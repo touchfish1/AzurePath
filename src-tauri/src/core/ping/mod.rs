@@ -164,7 +164,7 @@ fn extract_latency_ms(line: &str) -> f64 {
                 start -= 1;
             }
             if start > 0 && bytes[start - 1] == b'=' && start < end {
-                if let Ok(num) = std::str::from_utf8(&bytes[start..end])
+                if let Some(num) = std::str::from_utf8(&bytes[start..end])
                     .ok()
                     .and_then(|s| s.parse::<f64>().ok())
                 {
