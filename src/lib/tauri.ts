@@ -52,6 +52,11 @@ export interface PingCompletePayload {
   max_ms: number;
 }
 
+export interface PingErrorPayload {
+  task_id: string;
+  error: string;
+}
+
 export interface TraceHop {
   hop: number;
   addr: string | null;
@@ -189,6 +194,10 @@ export function onPingProgress(cb: (payload: PingProgressPayload) => void): Prom
 
 export function onPingComplete(cb: (payload: PingCompletePayload) => void): Promise<UnlistenFn> {
   return listen<PingCompletePayload>("ping:complete", (event) => cb(event.payload));
+}
+
+export function onPingError(cb: (payload: PingErrorPayload) => void): Promise<UnlistenFn> {
+  return listen<PingErrorPayload>("ping:error", (event) => cb(event.payload));
 }
 
 export function onTraceHop(cb: (payload: TraceHopPayload) => void): Promise<UnlistenFn> {

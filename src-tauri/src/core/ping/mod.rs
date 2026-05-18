@@ -1,5 +1,23 @@
 use tokio::process::Command;
 
+#[cfg(target_os = "windows")]
+use encoding_rs::GBK;
+
+/// Decode ping output bytes to a UTF-8 string.
+/// On non-Windows platforms, bytes are expected to be UTF-8.
+/// On Windows, the system locale encoding (e.g. GBK for Chinese) is used as fallback.
+fn decode_ping_output(bytes: &[u8]) -> String {
+    #[cfg(target_os = "windows")]
+    {
+        String::from_utf8(bytes.to_vec())
+            .unwrap_or_else(|_| GBK.decode(bytes).0.to_string())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        String::from_utf8_lossy(bytes).to_string()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct PingResult {
     pub seq: u32,
@@ -49,16 +67,16 @@ pub async fn execute_ping(
             .map_err(|e| format!("Failed to execute ping: {}", e))?
     };
 
-    if !output.status.success() {
+    // On Windows, system tools may output in the system locale encoding (e.g. GBK for Chinese).
+    // Try UTF-8 first, then fall back to the platform encoding.
+    let output_str = decode_ping_output(&output.stdout);
+
+    if !output.status.success() && output.stdout.is_empty() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        // Ping can still produce useful stdout even with non-zero exit (e.g. partial loss)
-        if output.stdout.is_empty() {
-            return Err(format!("Ping failed: {}", stderr));
-        }
+        return Err(format!("Ping failed: {}", stderr));
     }
 
-    String::from_utf8(output.stdout)
-        .map_err(|e| format!("Invalid UTF-8 from ping output: {}", e))
+    Ok(output_str)
 }
 
 /// Parse ping output into individual PingResult entries.
@@ -88,54 +106,39 @@ fn parse_ping_line(line: &str) -> Option<PingResult> {
 }
 
 /// Parse a Windows ping reply line.
-/// Example: "Reply from 8.8.8.8: bytes=32 time=11ms TTL=118"
-/// Example: "Reply from 192.168.1.1: Destination host unreachable."
-/// Example: "Request timed out."
+///
+/// English:  "Reply from 8.8.8.8: bytes=32 time=11ms TTL=118"
+/// Chinese:  "来自 8.8.8.8 的回复: 字节=32 时间=11ms TTL=118"
+/// Timeouts: "Request timed out." / "请求超时。"
+/// Unreach:  "Destination host unreachable." / "无法访问目标主机。"
 fn parse_windows_ping_line(line: &str) -> Option<PingResult> {
-    // Check for timeout
-    if line.contains("timed out") || line.contains("unreachable") {
+    // Timeout — check both English and Chinese
+    if line.contains("timed out") || line.contains("超时") {
         return Some(PingResult {
             seq: 0,
             latency_ms: -1.0,
             ttl: 0,
-            status: if line.contains("timed out") {
-                "timeout".to_string()
-            } else {
-                "unreachable".to_string()
-            },
+            status: "timeout".to_string(),
         });
     }
 
-    if !line.starts_with("Reply from") {
+    // Unreachable — check both languages
+    if line.contains("unreachable") || line.contains("无法访问") {
+        return Some(PingResult {
+            seq: 0,
+            latency_ms: -1.0,
+            ttl: 0,
+            status: "unreachable".to_string(),
+        });
+    }
+
+    // Success: TTL= is universal across all locale variants on Windows
+    if !line.contains("TTL=") {
         return None;
     }
 
-    let mut latency_ms = -1.0_f64;
-    let mut ttl = 0_u32;
-
-    // Parse "time=Xms" or "time=Xms "
-    if let Some(time_start) = line.find("time=") {
-        let after_time = &line[time_start + 5..];
-        let time_str = after_time
-            .split(|c: char| !c.is_ascii_digit() && c != '.')
-            .next()
-            .unwrap_or("");
-        if let Ok(val) = time_str.parse::<f64>() {
-            latency_ms = val;
-        }
-    }
-
-    // Parse "TTL=X"
-    if let Some(ttl_start) = line.find("TTL=") {
-        let after_ttl = &line[ttl_start + 4..];
-        let ttl_str = after_ttl
-            .split(|c: char| !c.is_ascii_digit())
-            .next()
-            .unwrap_or("");
-        if let Ok(val) = ttl_str.parse::<u32>() {
-            ttl = val;
-        }
-    }
+    let latency_ms = extract_latency_ms(line);
+    let ttl = extract_ttl(line);
 
     Some(PingResult {
         seq: 0,
@@ -143,6 +146,51 @@ fn parse_windows_ping_line(line: &str) -> Option<PingResult> {
         ttl,
         status: "success".to_string(),
     })
+}
+
+/// Extract latency value from a ping reply line.
+/// Works for both "time=11ms" and "时间=11ms" by scanning for "ms" backwards.
+fn extract_latency_ms(line: &str) -> f64 {
+    let bytes = line.as_bytes();
+    // Scan backwards from "ms" to find the number before it, preceded by "="
+    for i in (1..bytes.len().saturating_sub(1)).rev() {
+        if bytes[i] == b'm' && bytes[i + 1] == b's' {
+            // Walk backwards to find the start of the number
+            let mut end = i;
+            let mut start = end;
+            while start > 0
+                && (bytes[start - 1].is_ascii_digit() || bytes[start - 1] == b'.')
+            {
+                start -= 1;
+            }
+            if start > 0 && bytes[start - 1] == b'=' && start < end {
+                if let Ok(num) = std::str::from_utf8(&bytes[start..end])
+                    .ok()
+                    .and_then(|s| s.parse::<f64>().ok())
+                {
+                    return num;
+                }
+            }
+        }
+    }
+    -1.0
+}
+
+/// Extract TTL value from a ping reply line. "TTL=" is universal.
+fn extract_ttl(line: &str) -> u32 {
+    if let Some(start) = line.find("TTL=") {
+        let after = &line.as_bytes()[start + 4..];
+        let mut ttl_str = String::new();
+        for &b in after {
+            if b.is_ascii_digit() {
+                ttl_str.push(b as char);
+            } else {
+                break;
+            }
+        }
+        return ttl_str.parse::<u32>().unwrap_or(0);
+    }
+    0
 }
 
 /// Parse a Unix ping reply line.

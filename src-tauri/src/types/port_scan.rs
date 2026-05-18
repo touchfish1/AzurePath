@@ -7,6 +7,7 @@ pub struct PortRange {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ScanOptions {
     pub concurrency: u32,
     pub timeout_ms: u64,

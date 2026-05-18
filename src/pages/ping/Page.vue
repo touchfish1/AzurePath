@@ -7,8 +7,10 @@ import {
   pingStop,
   onPingProgress,
   onPingComplete,
+  onPingError,
   type PingProgressPayload,
   type PingCompletePayload,
+  type PingErrorPayload,
 } from "@/lib/tauri";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
@@ -31,6 +33,7 @@ const stats = ref<PingCompletePayload | null>(null);
 
 let unlistenProgress: UnlistenFn | null = null;
 let unlistenComplete: UnlistenFn | null = null;
+let unlistenError: UnlistenFn | null = null;
 
 async function startPing() {
   if (!target.value.trim()) return;
@@ -78,9 +81,16 @@ function handleComplete(payload: PingCompletePayload) {
   currentTaskId.value = "";
 }
 
+function handleError(payload: PingErrorPayload) {
+  error.value = payload.error;
+  running.value = false;
+  currentTaskId.value = "";
+}
+
 onMounted(async () => {
   unlistenProgress = await onPingProgress(handleProgress);
   unlistenComplete = await onPingComplete(handleComplete);
+  unlistenError = await onPingError(handleError);
 });
 
 onUnmounted(() => {
@@ -89,6 +99,7 @@ onUnmounted(() => {
   }
   unlistenProgress?.();
   unlistenComplete?.();
+  unlistenError?.();
 });
 </script>
 
