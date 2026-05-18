@@ -1,105 +1,21 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from "vue";
+import { onMounted, onUnmounted } from "vue";
 import { Play, Square } from "lucide-vue-next";
 import Button from "@/components/ui/button/Button.vue";
-import {
-  pingStart,
-  pingStop,
-  onPingProgress,
-  onPingComplete,
-  onPingError,
-  type PingProgressPayload,
-  type PingCompletePayload,
-  type PingErrorPayload,
-} from "@/lib/tauri";
-import type { UnlistenFn } from "@tauri-apps/api/event";
+import { usePingStore } from "@/stores/ping";
 
-const target = ref("8.8.8.8");
-const count = ref(4);
-const timeout = ref(3000);
-const running = ref(false);
-const error = ref("");
-const currentTaskId = ref("");
-
-interface PingResult {
-  seq: number;
-  ttl: number;
-  latencyMs: number | null;
-  status: string;
-}
-
-const results = ref<PingResult[]>([]);
-const stats = ref<PingCompletePayload | null>(null);
-
-let unlistenProgress: UnlistenFn | null = null;
-let unlistenComplete: UnlistenFn | null = null;
-let unlistenError: UnlistenFn | null = null;
-
-async function startPing() {
-  if (!target.value.trim()) return;
-  running.value = true;
-  error.value = "";
-  results.value = [];
-  stats.value = null;
-
-  try {
-    const taskId = await pingStart(target.value, {
-      count: count.value,
-      intervalMs: 1000,
-      timeoutMs: timeout.value,
-      payloadSize: 56,
-    });
-    currentTaskId.value = taskId;
-  } catch (e) {
-    error.value = String(e);
-    running.value = false;
-  }
-}
-
-async function stopPing() {
-  if (!currentTaskId.value) return;
-  try {
-    await pingStop(currentTaskId.value);
-  } catch {
-    // ignore stop errors
-  }
-  running.value = false;
-}
-
-function handleProgress(payload: PingProgressPayload) {
-  results.value.push({
-    seq: payload.seq,
-    ttl: payload.ttl,
-    latencyMs: payload.latency_ms,
-    status: payload.status,
-  });
-}
-
-function handleComplete(payload: PingCompletePayload) {
-  stats.value = payload;
-  running.value = false;
-  currentTaskId.value = "";
-}
-
-function handleError(payload: PingErrorPayload) {
-  error.value = payload.error;
-  running.value = false;
-  currentTaskId.value = "";
-}
+const store = usePingStore();
 
 onMounted(async () => {
-  unlistenProgress = await onPingProgress(handleProgress);
-  unlistenComplete = await onPingComplete(handleComplete);
-  unlistenError = await onPingError(handleError);
+  // Re-attach listeners if a task is still running from a previous visit
+  if (store.currentTaskId) {
+    await store.attachListeners();
+  }
 });
 
 onUnmounted(() => {
-  if (running.value && currentTaskId.value) {
-    pingStop(currentTaskId.value).catch(() => {});
-  }
-  unlistenProgress?.();
-  unlistenComplete?.();
-  unlistenError?.();
+  // Only detach listeners — never stop a running task
+  store.detachListeners();
 });
 </script>
 
@@ -117,20 +33,20 @@ onUnmounted(() => {
         <div class="flex-1 min-w-[180px]">
           <label class="mb-1 block text-xs font-medium text-ink-soft">目标地址</label>
           <input
-            v-model="target"
+            v-model="store.target"
             placeholder="IP 地址或域名"
-            :disabled="running"
+            :disabled="store.running"
             class="w-full rounded-lg border border-paper-deep bg-paper-warm/50 px-3 py-2 text-sm text-ink placeholder:text-ink-faint/50 outline-none transition-colors focus:border-bamboo/50 focus:ring-1 focus:ring-bamboo/20 disabled:opacity-50"
           />
         </div>
         <div class="w-24">
           <label class="mb-1 block text-xs font-medium text-ink-soft">次数</label>
           <input
-            v-model.number="count"
+            v-model.number="store.count"
             type="number"
             min="1"
             max="100"
-            :disabled="running"
+            :disabled="store.running"
             class="w-full rounded-lg border border-paper-deep bg-paper-warm/50 px-3 py-2 text-sm text-ink outline-none transition-colors focus:border-bamboo/50 focus:ring-1 focus:ring-bamboo/20 disabled:opacity-50"
           />
         </div>
@@ -140,21 +56,21 @@ onUnmounted(() => {
             <span class="sm:hidden">超时</span>
           </label>
           <input
-            v-model.number="timeout"
+            v-model.number="store.timeout"
             type="number"
             min="100"
             max="30000"
             step="100"
-            :disabled="running"
+            :disabled="store.running"
             class="w-full rounded-lg border border-paper-deep bg-paper-warm/50 px-3 py-2 text-sm text-ink outline-none transition-colors focus:border-bamboo/50 focus:ring-1 focus:ring-bamboo/20 disabled:opacity-50"
           />
         </div>
         <div class="flex gap-2">
-          <Button :disabled="running" @click="startPing">
+          <Button :disabled="store.running" @click="store.start">
             <Play class="mr-1.5 h-3.5 w-3.5" />
             开始
           </Button>
-          <Button variant="danger" :disabled="!running" @click="stopPing">
+          <Button variant="danger" :disabled="!store.running" @click="store.stop">
             <Square class="mr-1.5 h-3.5 w-3.5" />
             停止
           </Button>
@@ -164,15 +80,15 @@ onUnmounted(() => {
 
     <!-- Error banner -->
     <div
-      v-if="error"
+      v-if="store.error"
       class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800/30 dark:bg-red-900/10 dark:text-red-400"
     >
-      {{ error }}
+      {{ store.error }}
     </div>
 
     <!-- Results table -->
     <div
-      v-if="results.length > 0"
+      v-if="store.results.length > 0"
       class="noise-bg rounded-xl border border-paper-deep/60 bg-paper shadow-sm overflow-hidden"
     >
       <div class="px-5 py-3 border-b border-paper-deep/50">
@@ -190,7 +106,7 @@ onUnmounted(() => {
           </thead>
           <tbody>
             <tr
-              v-for="r in results"
+              v-for="r in store.results"
               :key="r.seq"
               class="border-b border-paper-deep/20 last:border-0 animate-slide-up"
             >
@@ -235,7 +151,7 @@ onUnmounted(() => {
 
     <!-- Stats panel -->
     <div
-      v-if="stats"
+      v-if="store.stats"
       class="noise-bg rounded-xl border border-paper-deep/60 bg-paper p-5 shadow-sm animate-scale-in"
     >
       <h2 class="text-sm font-semibold text-ink mb-4">统计</h2>
@@ -243,28 +159,28 @@ onUnmounted(() => {
         <div>
           <p class="text-xs text-ink-faint">发送 / 接收</p>
           <p class="mt-0.5 text-lg font-mono font-semibold text-ink">
-            {{ stats.sent }} / {{ stats.received }}
+            {{ store.stats.sent }} / {{ store.stats.received }}
           </p>
         </div>
         <div>
           <p class="text-xs text-ink-faint">丢包率</p>
           <p
             class="mt-0.5 text-lg font-mono font-semibold"
-            :class="stats.loss_percent > 0 ? 'text-red-600 dark:text-red-400' : 'text-bamboo'"
+            :class="store.stats.loss_percent > 0 ? 'text-red-600 dark:text-red-400' : 'text-bamboo'"
           >
-            {{ stats.loss_percent.toFixed(1) }}%
+            {{ store.stats.loss_percent.toFixed(1) }}%
           </p>
         </div>
         <div>
           <p class="text-xs text-ink-faint">最小 / 最大</p>
           <p class="mt-0.5 text-lg font-mono font-semibold text-ink">
-            {{ stats.min_ms.toFixed(1) }} / {{ stats.max_ms.toFixed(1) }} ms
+            {{ store.stats.min_ms.toFixed(1) }} / {{ store.stats.max_ms.toFixed(1) }} ms
           </p>
         </div>
         <div>
           <p class="text-xs text-ink-faint">平均延迟</p>
           <p class="mt-0.5 text-lg font-mono font-semibold text-ink">
-            {{ stats.avg_ms.toFixed(1) }} ms
+            {{ store.stats.avg_ms.toFixed(1) }} ms
           </p>
         </div>
       </div>

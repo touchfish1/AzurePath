@@ -54,11 +54,40 @@ async fn run_ping(
     target: &str,
     opts: &PingOptions,
 ) -> Result<(), String> {
-    let output = ping::execute_ping(target, opts.count, opts.timeout_ms).await?;
-    let results = ping::parse_ping_output(&output);
+    use std::process::Stdio;
+    use tokio::io::AsyncBufReadExt;
 
-    // Emit progress for each result
-    for result in &results {
+    let mut child = if cfg!(target_os = "windows") {
+        tokio::process::Command::new("ping")
+            .arg("-n")
+            .arg(opts.count.to_string())
+            .arg("-w")
+            .arg(opts.timeout_ms.to_string())
+            .arg(target)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("Failed to spawn ping: {}", e))?
+    } else {
+        let timeout_s = (opts.timeout_ms / 1000).max(1);
+        tokio::process::Command::new("ping")
+            .arg("-c")
+            .arg(opts.count.to_string())
+            .arg("-W")
+            .arg(timeout_s.to_string())
+            .arg(target)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("Failed to spawn ping: {}", e))?
+    };
+
+    let stdout = child.stdout.take().ok_or("Failed to capture ping stdout")?;
+    let mut reader = tokio::io::BufReader::new(stdout);
+    let mut buf = Vec::new();
+    let mut ping_results: Vec<ping::PingResult> = Vec::new();
+
+    loop {
         // Check cancellation
         if let Ok(tokens) = CANCEL_TOKENS.lock() {
             if let Some(cancel) = tokens.get(task_id) {
@@ -68,24 +97,49 @@ async fn run_ping(
             }
         }
 
-        let progress = PingProgress {
-            task_id: task_id.to_string(),
-            seq: result.seq,
-            ttl: result.ttl,
-            latency_ms: if result.latency_ms >= 0.0 {
-                Some(result.latency_ms)
-            } else {
-                None
-            },
-            status: result.status.clone(),
-        };
+        buf.clear();
+        let n = reader
+            .read_until(b'\n', &mut buf)
+            .await
+            .map_err(|e| format!("Failed to read ping output: {}", e))?;
+        if n == 0 {
+            break; // EOF
+        }
 
-        app.emit("ping:progress", &progress)
-            .map_err(|e| format!("Failed to emit progress: {}", e))?;
+        // Decode with encoding-aware conversion (handles GBK on Chinese Windows)
+        let line = ping::decode_ping_output(&buf);
+        let line = line.trim_end_matches('\n').trim_end_matches('\r');
+
+        if line.is_empty() {
+            continue;
+        }
+
+        if let Some(result) = ping::parse_ping_line(line) {
+            let seq = ping_results.len() as u32 + 1;
+            let progress = PingProgress {
+                task_id: task_id.to_string(),
+                seq,
+                ttl: result.ttl,
+                latency_ms: if result.latency_ms >= 0.0 {
+                    Some(result.latency_ms)
+                } else {
+                    None
+                },
+                status: result.status.clone(),
+            };
+
+            app.emit("ping:progress", &progress)
+                .map_err(|e| format!("Failed to emit progress: {}", e))?;
+
+            ping_results.push(result);
+        }
     }
 
+    // Wait for process to exit
+    let _ = child.wait().await;
+
     // Compute and emit stats
-    let stats = ping::compute_stats(&results);
+    let stats = ping::compute_stats(&ping_results);
     let complete = PingComplete {
         task_id: task_id.to_string(),
         sent: stats.sent,

@@ -6,7 +6,7 @@ use encoding_rs::GBK;
 /// Decode ping output bytes to a UTF-8 string.
 /// On non-Windows platforms, bytes are expected to be UTF-8.
 /// On Windows, the system locale encoding (e.g. GBK for Chinese) is used as fallback.
-fn decode_ping_output(bytes: &[u8]) -> String {
+pub(crate) fn decode_ping_output(bytes: &[u8]) -> String {
     #[cfg(target_os = "windows")]
     {
         String::from_utf8(bytes.to_vec())
@@ -97,7 +97,7 @@ pub fn parse_ping_output(output: &str) -> Vec<PingResult> {
     results
 }
 
-fn parse_ping_line(line: &str) -> Option<PingResult> {
+pub fn parse_ping_line(line: &str) -> Option<PingResult> {
     if cfg!(target_os = "windows") {
         parse_windows_ping_line(line)
     } else {

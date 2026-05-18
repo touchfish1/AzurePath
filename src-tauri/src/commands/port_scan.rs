@@ -62,7 +62,6 @@ async fn run_port_scan(
     cancel_flag: Arc<AtomicBool>,
 ) -> Result<(), String> {
     let total_ports = (port_range.end.saturating_sub(port_range.start) + 1) as u32;
-    let mut scanned: u32 = 0;
     let mut open_ports: Vec<OpenPort> = Vec::new();
 
     // Emit initial progress
@@ -78,9 +77,10 @@ async fn run_port_scan(
     .map_err(|e| format!("Failed to emit progress: {}", e))?;
 
     let semaphore = Arc::new(tokio::sync::Semaphore::new(opts.concurrency as usize));
-    let mut handles = Vec::new();
     let target_arc = Arc::new(target.to_string());
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<Option<u16>>(total_ports as usize);
 
+    // Spawn all scan tasks — each sends its result through the channel
     for port in port_range.start..=port_range.end {
         if cancel_flag.load(Ordering::SeqCst) {
             break;
@@ -89,42 +89,38 @@ async fn run_port_scan(
         let sem_clone = semaphore.clone();
         let target_clone = target_arc.clone();
         let cancel_clone = cancel_flag.clone();
+        let tx_clone = tx.clone();
         let timeout_ms = opts.timeout_ms;
 
-        let handle = tokio::spawn(async move {
+        tokio::spawn(async move {
             let _permit = match sem_clone.acquire_owned().await {
                 Ok(p) => p,
-                Err(_) => return None,
+                Err(_) => return,
             };
             if cancel_clone.load(Ordering::SeqCst) {
-                return None;
+                return;
             }
             let is_open = port_scan::tcp_connect::check_port(&target_clone, port, timeout_ms).await;
-            if is_open {
-                Some(port)
-            } else {
-                None
-            }
+            let _ = tx_clone.send(if is_open { Some(port) } else { None }).await;
         });
-
-        handles.push(handle);
     }
 
-    for handle in handles {
-        if cancel_flag.load(Ordering::SeqCst) {
-            break;
-        }
+    // Drop the sender so rx.recv() knows when all senders are gone
+    drop(tx);
 
+    // Collect results as they arrive (real-time, not in-order)
+    let mut scanned: u32 = 0;
+    while let Some(result) = rx.recv().await {
         scanned += 1;
 
-        if let Ok(Some(port)) = handle.await {
+        if let Some(port) = result {
             let open_port = OpenPort {
                 port,
                 service: port_scan::guess_service(port),
             };
             open_ports.push(open_port.clone());
 
-            // Emit found event
+            // Emit found immediately
             app.emit(
                 "port:found",
                 &PortFound {

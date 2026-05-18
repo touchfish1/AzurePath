@@ -77,6 +77,16 @@ export interface TraceCompletePayload {
   hops: TraceHop[];
 }
 
+export interface TraceErrorPayload {
+  task_id: string;
+  error: string;
+}
+
+export interface PortErrorPayload {
+  task_id: string;
+  error: string;
+}
+
 export interface PortProgressPayload {
   task_id: string;
   scanned: number;
@@ -208,6 +218,10 @@ export function onTraceComplete(cb: (payload: TraceCompletePayload) => void): Pr
   return listen<TraceCompletePayload>("trace:complete", (event) => cb(event.payload));
 }
 
+export function onTraceError(cb: (payload: TraceErrorPayload) => void): Promise<UnlistenFn> {
+  return listen<TraceErrorPayload>("trace:error", (event) => cb(event.payload));
+}
+
 export function onPortProgress(cb: (payload: PortProgressPayload) => void): Promise<UnlistenFn> {
   return listen<PortProgressPayload>("port:progress", (event) => cb(event.payload));
 }
@@ -218,6 +232,10 @@ export function onPortFound(cb: (payload: PortFoundPayload) => void): Promise<Un
 
 export function onPortComplete(cb: (payload: PortCompletePayload) => void): Promise<UnlistenFn> {
   return listen<PortCompletePayload>("port:complete", (event) => cb(event.payload));
+}
+
+export function onPortError(cb: (payload: PortErrorPayload) => void): Promise<UnlistenFn> {
+  return listen<PortErrorPayload>("port:error", (event) => cb(event.payload));
 }
 
 export function onDnsResult(cb: (payload: DnsResultPayload) => void): Promise<UnlistenFn> {

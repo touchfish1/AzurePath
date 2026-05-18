@@ -11,6 +11,19 @@ use crate::types::traceroute::{TraceComplete, TraceHop, TraceOptions};
 static CANCEL_TOKENS: LazyLock<Mutex<HashMap<String, AtomicBool>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
+/// Decode process output bytes to UTF-8, handling system locale encoding (e.g. GBK on Chinese Windows).
+fn decode_line(bytes: &[u8]) -> String {
+    #[cfg(target_os = "windows")]
+    {
+        String::from_utf8(bytes.to_vec())
+            .unwrap_or_else(|_| encoding_rs::GBK.decode(bytes).0.to_string())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        String::from_utf8_lossy(bytes).to_string()
+    }
+}
+
 #[tauri::command]
 pub async fn traceroute_start(
     app: AppHandle,
@@ -52,11 +65,40 @@ async fn run_traceroute(
     target: &str,
     opts: &TraceOptions,
 ) -> Result<(), String> {
-    let output =
-        traceroute::execute_traceroute(target, opts.max_hops, opts.timeout_ms).await?;
-    let results = traceroute::parse_traceroute_output(&output);
+    use std::process::Stdio;
+    use tokio::io::AsyncBufReadExt;
 
-    for result in &results {
+    let mut child = if cfg!(target_os = "windows") {
+        tokio::process::Command::new("tracert")
+            .arg("-h")
+            .arg(opts.max_hops.to_string())
+            .arg("-w")
+            .arg(opts.timeout_ms.to_string())
+            .arg(target)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("Failed to spawn tracert: {}", e))?
+    } else {
+        let timeout_s = (opts.timeout_ms / 1000).max(1);
+        tokio::process::Command::new("traceroute")
+            .arg("-m")
+            .arg(opts.max_hops.to_string())
+            .arg("-w")
+            .arg(timeout_s.to_string())
+            .arg(target)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("Failed to spawn traceroute: {}", e))?
+    };
+
+    let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
+    let mut reader = tokio::io::BufReader::new(stdout);
+    let mut buf = Vec::new();
+    let mut hop_results = Vec::new();
+
+    loop {
         // Check cancellation
         if let Ok(tokens) = CANCEL_TOKENS.lock() {
             if let Some(cancel) = tokens.get(task_id) {
@@ -66,21 +108,57 @@ async fn run_traceroute(
             }
         }
 
-        let hop = TraceHop {
-            hop: result.hop,
-            addr: result.addr.clone(),
-            hostname: result.hostname.clone(),
-            latencies: result.latencies.clone(),
-        };
+        buf.clear();
+        let n = reader
+            .read_until(b'\n', &mut buf)
+            .await
+            .map_err(|e| format!("Failed to read output: {}", e))?;
+        if n == 0 {
+            break;
+        }
 
-        app.emit("trace:hop", &hop)
-            .map_err(|e| format!("Failed to emit hop: {}", e))?;
+        // Decode with encoding fallback
+        let line = decode_line(&buf);
+        let line = line.trim_end_matches('\n').trim_end_matches('\r');
+
+        if line.is_empty() {
+            continue;
+        }
+
+        // Use platform-appropriate single-line parser
+        #[allow(unused_assignments)]
+        let mut parsed_hop = None;
+        #[cfg(target_os = "windows")]
+        {
+            parsed_hop = traceroute::parse_tracert_line(line);
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            // Unix line parsing not yet implemented for streaming
+            // falls back to batch parsing after process exit
+        }
+
+        if let Some(hop) = parsed_hop {
+            let hop_event = TraceHop {
+                hop: hop.hop,
+                addr: hop.addr.clone(),
+                hostname: hop.hostname.clone(),
+                latencies: hop.latencies.clone(),
+            };
+
+            app.emit("trace:hop", &hop_event)
+                .map_err(|e| format!("Failed to emit hop: {}", e))?;
+
+            hop_results.push(hop);
+        }
     }
+
+    let _ = child.wait().await;
 
     let complete = TraceComplete {
         task_id: task_id.to_string(),
         target: target.to_string(),
-        hops: results
+        hops: hop_results
             .iter()
             .map(|r| TraceHop {
                 hop: r.hop,

@@ -1,5 +1,18 @@
 use tokio::process::Command;
 
+/// Decode process output bytes to UTF-8, handling system locale encoding (e.g. GBK on Chinese Windows).
+fn decode_output(bytes: &[u8]) -> String {
+    #[cfg(target_os = "windows")]
+    {
+        String::from_utf8(bytes.to_vec())
+            .unwrap_or_else(|_| encoding_rs::GBK.decode(bytes).0.to_string())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        String::from_utf8_lossy(bytes).to_string()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ExecuteTraceResult {
     pub hop: u32,
@@ -45,13 +58,14 @@ pub async fn execute_traceroute(
             .map_err(|e| format!("Failed to execute traceroute: {}", e))?
     };
 
-    if !output.status.success() && output.stdout.is_empty() {
+    let output_str = decode_output(&output.stdout);
+
+    if !output.status.success() && output_str.is_empty() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!("Traceroute failed: {}", stderr));
     }
 
-    String::from_utf8(output.stdout)
-        .map_err(|e| format!("Invalid UTF-8 from traceroute output: {}", e))
+    Ok(output_str)
 }
 
 /// Parse traceroute/tracert output into structured hop results.
@@ -67,75 +81,76 @@ pub fn parse_traceroute_output(output: &str) -> Vec<ExecuteTraceResult> {
     results
 }
 
-/// Parse Windows tracert output.
-/// Windows tracert format:
-///   1    <1 ms    <1 ms    <1 ms  192.168.1.1
-///   2     *        *        *     Request timed out.
-///   3    11 ms    12 ms    11 ms  8.8.8.8
-fn parse_windows_tracert_output(output: &str, results: &mut Vec<ExecuteTraceResult>) {
-    for line in output.lines() {
-        let line = line.trim();
-        if line.is_empty() || !line.chars().next().map_or(false, |c| c.is_ascii_digit()) {
-            continue;
-        }
+/// Parse a single Windows tracert output line.
+/// Returns `None` if the line is not a valid hop line.
+pub fn parse_tracert_line(line: &str) -> Option<ExecuteTraceResult> {
+    let line = line.trim();
+    if line.is_empty() || !line.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+        return None;
+    }
 
-        // Skip header lines that start with "Tracing" or "over"
-        if line.to_lowercase().contains("tracing")
-            || line.to_lowercase().contains("trace complete")
-        {
-            continue;
-        }
+    // Skip header/summary lines
+    if line.to_lowercase().contains("tracing") || line.to_lowercase().contains("trace complete") {
+        return None;
+    }
 
-        let hop = match line.split_whitespace().next() {
-            Some(n) => n.parse::<u32>().unwrap_or(0),
-            None => continue,
-        };
+    let hop = match line.split_whitespace().next() {
+        Some(n) => n.parse::<u32>().unwrap_or(0),
+        None => return None,
+    };
 
-        if hop == 0 {
-            continue;
-        }
+    if hop == 0 {
+        return None;
+    }
 
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() < 2 {
-            continue;
-        }
+    let parts: Vec<&str> = line.split_whitespace().collect();
+    if parts.len() < 2 {
+        return None;
+    }
 
-        // Extract latencies (parts[1..parts.len()-1]) and address (last part)
-        let addr_str = parts[parts.len() - 1];
-        let latency_parts = &parts[1..parts.len() - 1];
+    // Extract latencies (parts[1..parts.len()-1]) and address (last part)
+    let addr_str = parts[parts.len() - 1];
+    let latency_parts = &parts[1..parts.len() - 1];
 
-        let mut latencies = Vec::new();
-        for &lat_str in latency_parts {
-            if lat_str == "*" || lat_str.to_lowercase().contains("timeout") {
-                latencies.push(None);
+    let mut latencies = Vec::new();
+    for &lat_str in latency_parts {
+        if lat_str == "*" || lat_str.to_lowercase().contains("timeout") {
+            latencies.push(None);
+        } else {
+            let cleaned: String = lat_str
+                .chars()
+                .filter(|c| c.is_ascii_digit() || *c == '.' || *c == '<')
+                .collect();
+            if cleaned == "<" {
+                latencies.push(Some(0.0));
+            } else if let Ok(val) = cleaned.parse::<f64>() {
+                latencies.push(Some(val));
             } else {
-                // Parse "<1ms", "11ms", "12 ms" etc.
-                let cleaned: String = lat_str
-                    .chars()
-                    .filter(|c| c.is_ascii_digit() || *c == '.' || *c == '<')
-                    .collect();
-                if cleaned == "<" {
-                    latencies.push(Some(0.0));
-                } else if let Ok(val) = cleaned.parse::<f64>() {
-                    latencies.push(Some(val));
-                } else {
-                    latencies.push(None);
-                }
+                latencies.push(None);
             }
         }
+    }
 
-        let addr = if addr_str == "*" || addr_str.to_lowercase().contains("request timed out") {
-            None
-        } else {
-            Some(addr_str.to_string())
-        };
+    let addr = if addr_str == "*" || addr_str.to_lowercase().contains("request timed out") {
+        None
+    } else {
+        Some(addr_str.to_string())
+    };
 
-        results.push(ExecuteTraceResult {
-            hop,
-            addr,
-            hostname: None, // Windows tracert doesn't separate hostname from addr easily
-            latencies,
-        });
+    Some(ExecuteTraceResult {
+        hop,
+        addr,
+        hostname: None,
+        latencies,
+    })
+}
+
+/// Parse Windows tracert output using the single-line parser.
+fn parse_windows_tracert_output(output: &str, results: &mut Vec<ExecuteTraceResult>) {
+    for line in output.lines() {
+        if let Some(result) = parse_tracert_line(line) {
+            results.push(result);
+        }
     }
 }
 
