@@ -32,6 +32,16 @@ const routes: RouteRecordRaw[] = [
     name: "history",
     component: () => import("@/pages/history/Page.vue"),
   },
+  {
+    path: "/chat",
+    name: "chat",
+    component: () => import("@/pages/chat/Page.vue"),
+  },
+  {
+    path: "/files",
+    name: "files",
+    component: () => import("@/pages/files/Page.vue"),
+  },
 ];
 
 const router = createRouter({

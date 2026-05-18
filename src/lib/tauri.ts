@@ -245,3 +245,126 @@ export function onDnsResult(cb: (payload: DnsResultPayload) => void): Promise<Un
 export function onDnsError(cb: (payload: DnsErrorPayload) => void): Promise<UnlistenFn> {
   return listen<DnsErrorPayload>("dns:error", (event) => cb(event.payload));
 }
+
+// ============================================================
+// Phase 2 — LAN Discovery + Chat + File Transfer
+// ============================================================
+
+export interface PeerInfo {
+  id: string;
+  hostname: string;
+  ip: string;
+  os: string;
+  listen_port: number;
+  last_seen: string;
+  status: string;
+}
+
+export interface StoredMessage {
+  id: string;
+  peer_id: string;
+  peer_name: string;
+  peer_ip: string;
+  peer_os: string | null;
+  content: string;
+  is_broadcast: boolean;
+  is_incoming: boolean;
+  file_ref: string | null;
+  created_at: string;
+}
+
+export interface FileTransfer {
+  id: string;
+  filename: string;
+  path: string | null;
+  size: number;
+  received: number;
+  status: string;
+  peer_id: string;
+  is_incoming: boolean;
+  created_at: string;
+}
+
+/** Initialize all LAN services. */
+export function lanInit(): Promise<void> {
+  return invoke<void>("lan_init");
+}
+
+/** Shutdown all LAN services. */
+export function lanShutdown(): Promise<void> {
+  return invoke<void>("lan_shutdown");
+}
+
+/** Get discovered peers. */
+export function discoveryPeers(): Promise<PeerInfo[]> {
+  return invoke<PeerInfo[]>("discovery_peers");
+}
+
+/** Send a chat message to a specific peer. */
+export function chatSend(target: string, content: string): Promise<StoredMessage> {
+  return invoke<StoredMessage>("chat_send", { target, content });
+}
+
+/** Broadcast a chat message to all connected peers. */
+export function chatBroadcast(content: string): Promise<StoredMessage> {
+  return invoke<StoredMessage>("chat_broadcast", { content });
+}
+
+/** Get messages from chat history, optionally filtered by peer. */
+export function chatMessages(peerId?: string): Promise<StoredMessage[]> {
+  return invoke<StoredMessage[]>("chat_messages", { peerId });
+}
+
+/** Get recent chat history. */
+export function chatHistory(limit?: number): Promise<StoredMessage[]> {
+  return invoke<StoredMessage[]>("chat_history", { limit });
+}
+
+/** Send a file to a peer. Returns the file transfer ID. */
+export function fileSend(target: string, path: string): Promise<string> {
+  return invoke<string>("file_send", { target, path });
+}
+
+/** Accept an incoming file transfer. */
+export function fileAccept(fileId: string, receiverPort: number): Promise<void> {
+  return invoke<void>("file_accept", { fileId, receiverPort });
+}
+
+/** Reject an incoming file transfer. */
+export function fileReject(fileId: string): Promise<void> {
+  return invoke<void>("file_reject", { fileId });
+}
+
+/** List all file transfers. */
+export function fileList(): Promise<FileTransfer[]> {
+  return invoke<FileTransfer[]>("file_list");
+}
+
+// Event listeners
+export function onPeerList(cb: (peers: PeerInfo[]) => void): Promise<UnlistenFn> {
+  return listen<PeerInfo[]>("peer:list", (event) => cb(event.payload));
+}
+
+export function onPeerOffline(cb: (payload: { id: string }) => void): Promise<UnlistenFn> {
+  return listen<{ id: string }>("peer:offline", (event) => cb(event.payload));
+}
+
+export function onChatMessage(cb: (msg: StoredMessage) => void): Promise<UnlistenFn> {
+  return listen<StoredMessage>("chat:message", (event) => cb(event.payload));
+}
+
+export function onFileRequest(cb: (payload: { fileId: string; filename: string; size: number; from: string }) => void): Promise<UnlistenFn> {
+  return listen("file:request", (event) => cb(event.payload as any));
+}
+
+export function onFileProgress(cb: (payload: { fileId: string; received: number; total: number; speed: number }) => void): Promise<UnlistenFn> {
+  return listen("file:progress", (event) => cb(event.payload as any));
+}
+
+export function onFileComplete(cb: (payload: { fileId: string; path: string }) => void): Promise<UnlistenFn> {
+  return listen("file:complete", (event) => cb(event.payload as any));
+}
+
+export function onFileError(cb: (payload: { fileId: string; error: string }) => void): Promise<UnlistenFn> {
+  return listen("file:error", (event) => cb(event.payload as any));
+}
