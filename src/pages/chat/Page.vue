@@ -23,6 +23,7 @@ import {
 } from "@/lib/tauri";
 import { formatTime, formatSize, progressPercent } from "@/lib/format";
 import { useFileTransferListeners } from "@/composables/useFileTransfer";
+import { sendSystemNotification } from "@/composables/useNotification";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 
@@ -111,6 +112,13 @@ onMounted(async () => {
 
   unlistenMessage = await onChatMessage((msg) => {
     messages.value.push(msg);
+    // Send system notification when window is not focused
+    if (!document.hasFocus()) {
+      sendSystemNotification(
+        "新消息",
+        `${msg.peer_name}: ${msg.content}`,
+      );
+    }
   });
 
   unlistenPeerList = await onPeerList((list) => {

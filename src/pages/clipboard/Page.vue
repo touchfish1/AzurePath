@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from "vue";
+import { useVirtualList } from "@vueuse/core";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { Search, Trash2, Star, Copy, FileText, Image, File, X } from "lucide-vue-next";
 import Button from "@/components/ui/button/Button.vue";
@@ -33,6 +34,21 @@ const filteredEntries = computed(() => {
     (e) => e.text_content?.toLowerCase().includes(q)
   );
 });
+
+// Virtual list for clipboard entries
+const { list: virtualEntries, containerProps, wrapperProps } = useVirtualList(
+  filteredEntries,
+  {
+    itemHeight: (index: number) => {
+      const item = filteredEntries.value[index];
+      if (!item) return 84;
+      if (item.content_type === "image") return 164;
+      if (item.content_type === "file" && item.file_paths && item.file_paths.length > 2) return 104;
+      return 84;
+    },
+    overscan: 10,
+  }
+);
 
 onMounted(async () => {
   try {
@@ -167,7 +183,7 @@ function onImageError(event: Event) {
     </div>
 
     <!-- Content -->
-    <div class="flex-1 overflow-y-auto p-4">
+    <div class="flex-1 flex flex-col overflow-hidden p-4">
       <div v-if="loading" class="flex items-center justify-center h-full text-sm text-ink-faint">
         加载中...
       </div>
@@ -180,68 +196,70 @@ function onImageError(event: Event) {
         </div>
       </div>
 
-      <div v-else class="space-y-2">
-        <div
-          v-for="entry in filteredEntries"
-          :key="entry.id"
-          class="flex items-start gap-3 rounded-xl border border-paper-deep/20 bg-paper-warm/30 p-3 transition-colors hover:bg-paper-warm/60"
-        >
-          <!-- Type icon -->
-          <div class="mt-0.5 shrink-0 rounded-lg bg-paper-deep/20 p-2">
-            <component :is="typeIcon(entry.content_type)" class="h-4 w-4 text-ink-soft" />
-          </div>
+      <div v-else v-bind="containerProps" class="flex-1 overflow-y-auto">
+        <div v-bind="wrapperProps" class="space-y-2">
+          <div
+            v-for="{ data: entry } in virtualEntries"
+            :key="entry.id"
+            class="flex items-start gap-3 rounded-xl border border-paper-deep/20 bg-paper-warm/30 p-3 transition-colors hover:bg-paper-warm/60"
+          >
+            <!-- Type icon -->
+            <div class="mt-0.5 shrink-0 rounded-lg bg-paper-deep/20 p-2">
+              <component :is="typeIcon(entry.content_type)" class="h-4 w-4 text-ink-soft" />
+            </div>
 
-          <!-- Content -->
-          <div class="flex-1 min-w-0">
-            <div v-if="entry.content_type === 'text' && entry.text_content" class="text-sm text-ink whitespace-pre-wrap break-words">
-              {{ truncate(entry.text_content, 200) }}
+            <!-- Content -->
+            <div class="flex-1 min-w-0">
+              <div v-if="entry.content_type === 'text' && entry.text_content" class="text-sm text-ink whitespace-pre-wrap break-words">
+                {{ truncate(entry.text_content, 200) }}
+              </div>
+              <div v-else-if="entry.content_type === 'image' && entry.image_path" class="text-sm text-ink-soft">
+                <img
+                  :src="convertFileSrc(entry.image_path)"
+                  :alt="entry.image_path.split('/').pop() || 'image'"
+                  class="h-24 w-auto rounded-lg object-cover"
+                  @error="onImageError"
+                />
+                <p class="mt-1 truncate">
+                  {{ entry.image_path.split('/').pop() || entry.image_path }}
+                </p>
+              </div>
+              <div v-else-if="entry.content_type === 'file' && entry.file_paths" class="text-sm text-ink-soft">
+                <p v-for="f in entry.file_paths" :key="f" class="truncate">{{ f }}</p>
+              </div>
+              <div class="mt-1 flex items-center gap-2 text-xs text-ink-faint">
+                <span>{{ formatTime(entry.created_at) }}</span>
+              </div>
             </div>
-            <div v-else-if="entry.content_type === 'image' && entry.image_path" class="text-sm text-ink-soft">
-              <img
-                :src="convertFileSrc(entry.image_path)"
-                :alt="entry.image_path.split('/').pop() || 'image'"
-                class="h-24 w-auto rounded-lg object-cover"
-                @error="onImageError"
-              />
-              <p class="mt-1 truncate">
-                {{ entry.image_path.split('/').pop() || entry.image_path }}
-              </p>
-            </div>
-            <div v-else-if="entry.content_type === 'file' && entry.file_paths" class="text-sm text-ink-soft">
-              <p v-for="f in entry.file_paths" :key="f" class="truncate">{{ f }}</p>
-            </div>
-            <div class="mt-1 flex items-center gap-2 text-xs text-ink-faint">
-              <span>{{ formatTime(entry.created_at) }}</span>
-            </div>
-          </div>
 
-          <!-- Actions -->
-          <div class="flex shrink-0 items-center gap-1">
-            <button
-              class="rounded-lg p-1.5 transition-colors"
-              :class="entry.is_favorite ? 'text-yellow-500' : 'text-ink-faint hover:text-yellow-500'"
-              @click="toggleFavorite(entry.id)"
-              :title="entry.is_favorite ? '取消收藏' : '收藏'"
-              :aria-label="entry.is_favorite ? '取消收藏' : '收藏'"
-            >
-              <Star class="h-4 w-4" :fill="entry.is_favorite ? 'currentColor' : 'none'" />
-            </button>
-            <button
-              class="rounded-lg p-1.5 text-ink-faint transition-colors hover:text-bamboo"
-              @click="copyEntry(entry.id)"
-              :title="copiedId === entry.id ? '已复制!' : '复制'"
-              :aria-label="copiedId === entry.id ? '已复制' : '复制到剪贴板'"
-            >
-              <Copy class="h-4 w-4" />
-            </button>
-            <button
-              class="rounded-lg p-1.5 text-ink-faint transition-colors hover:text-red-500"
-              @click="deleteEntry(entry.id)"
-              title="删除"
-              aria-label="删除"
-            >
-              <X class="h-4 w-4" />
-            </button>
+            <!-- Actions -->
+            <div class="flex shrink-0 items-center gap-1">
+              <button
+                class="rounded-lg p-1.5 transition-colors"
+                :class="entry.is_favorite ? 'text-yellow-500' : 'text-ink-faint hover:text-yellow-500'"
+                @click="toggleFavorite(entry.id)"
+                :title="entry.is_favorite ? '取消收藏' : '收藏'"
+                :aria-label="entry.is_favorite ? '取消收藏' : '收藏'"
+              >
+                <Star class="h-4 w-4" :fill="entry.is_favorite ? 'currentColor' : 'none'" />
+              </button>
+              <button
+                class="rounded-lg p-1.5 text-ink-faint transition-colors hover:text-bamboo"
+                @click="copyEntry(entry.id)"
+                :title="copiedId === entry.id ? '已复制!' : '复制'"
+                :aria-label="copiedId === entry.id ? '已复制' : '复制到剪贴板'"
+              >
+                <Copy class="h-4 w-4" />
+              </button>
+              <button
+                class="rounded-lg p-1.5 text-ink-faint transition-colors hover:text-red-500"
+                @click="deleteEntry(entry.id)"
+                title="删除"
+                aria-label="删除"
+              >
+                <X class="h-4 w-4" />
+              </button>
+            </div>
           </div>
         </div>
       </div>

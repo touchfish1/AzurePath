@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from "vue";
+import { useVirtualList } from "@vueuse/core";
 import { useRouter } from "vue-router";
 import {
   Clipboard,
@@ -69,6 +70,12 @@ const filteredEntries = computed(() => {
 
   return entries;
 });
+
+// Virtual list for large entry lists
+const { list: virtualEntries, containerProps, wrapperProps } = useVirtualList(
+  filteredEntries,
+  { itemHeight: 80, overscan: 10 }
+);
 
 interface TimelineGroup {
   label: string;
@@ -237,7 +244,7 @@ async function clearAll() {
     </div>
 
     <!-- Content -->
-    <div class="flex-1 overflow-y-auto p-6">
+    <div class="flex-1 flex flex-col overflow-hidden p-6">
       <div v-if="loading" class="flex items-center justify-center h-full text-sm text-ink-faint">
         <div class="flex flex-col items-center gap-2">
           <Activity class="h-5 w-5 animate-pulse text-bamboo" />
@@ -266,7 +273,7 @@ async function clearAll() {
         </div>
 
         <!-- Timeline tab -->
-        <div v-if="activeTab === 'timeline'" class="mt-8 space-y-8">
+        <div v-if="activeTab === 'timeline'" class="mt-8 space-y-8 overflow-y-auto flex-1">
           <div v-if="timelineGroups.length === 0" class="flex items-center justify-center rounded-xl border border-dashed border-paper-deep/30 py-12 text-sm text-ink-faint">
             <div class="text-center">
               <Clock class="mx-auto h-6 w-6 mb-2 opacity-40" />
@@ -303,8 +310,8 @@ async function clearAll() {
         </div>
 
         <!-- Favorites / All entries tab -->
-        <div v-else class="mt-8">
-          <div class="mb-3 flex items-center justify-between">
+        <div v-else class="mt-8 flex flex-col flex-1 overflow-hidden">
+          <div class="mb-3 flex items-center justify-between shrink-0">
             <p class="text-xs text-ink-faint">
               {{ filteredEntries.length }} 条记录
               <span v-if="selectedIds.size > 0" class="ml-2 text-bamboo">{{ selectedIds.size }} 已选择</span>
@@ -327,27 +334,29 @@ async function clearAll() {
             </div>
           </div>
 
-          <div v-else class="space-y-2">
-            <div
-              v-for="entry in filteredEntries"
-              :key="entry.id"
-              class="flex items-start gap-3 rounded-xl border border-paper-deep/20 bg-paper-warm/30 p-3 transition-colors hover:bg-paper-warm/60"
-              :class="{ 'border-bamboo/30 bg-bamboo/5': selectedIds.has(entry.id) }"
-            >
-              <div class="mt-1 shrink-0">
-                <input type="checkbox" :checked="selectedIds.has(entry.id)" class="h-4 w-4 rounded border-paper-deep/40 text-bamboo focus:ring-bamboo/30" @change="toggleSelect(entry.id)" />
-              </div>
-              <div class="mt-0.5 shrink-0 rounded-lg bg-paper-deep/20 p-2">
-                <component :is="typeIcon(entry.content_type)" class="h-4 w-4 text-ink-soft" />
-              </div>
-              <div class="min-w-0 flex-1">
-                <div v-if="entry.content_type === 'text' && entry.text_content" class="truncate text-sm text-ink">{{ truncate(entry.text_content, 120) }}</div>
-                <div v-else-if="entry.content_type === 'image'" class="truncate text-sm text-ink-soft"><span>图片</span></div>
-                <div v-else-if="entry.content_type === 'file' && entry.file_paths" class="truncate text-sm text-ink-soft"><span>{{ entry.file_paths.join(", ") }}</span></div>
-                <div class="mt-1 text-xs text-ink-faint">{{ formatTime(entry.created_at) }}</div>
-              </div>
-              <div v-if="entry.is_favorite" class="shrink-0 self-center rounded-md bg-yellow-500/10 px-2 py-0.5 text-xs text-yellow-600">
-                <Star class="inline-block h-3 w-3 fill-yellow-500" />
+          <div v-else v-bind="containerProps" class="flex-1 overflow-y-auto">
+            <div v-bind="wrapperProps" class="space-y-2">
+              <div
+                v-for="{ data: entry } in virtualEntries"
+                :key="entry.id"
+                class="flex items-start gap-3 rounded-xl border border-paper-deep/20 bg-paper-warm/30 p-3 transition-colors hover:bg-paper-warm/60"
+                :class="{ 'border-bamboo/30 bg-bamboo/5': selectedIds.has(entry.id) }"
+              >
+                <div class="mt-1 shrink-0">
+                  <input type="checkbox" :checked="selectedIds.has(entry.id)" class="h-4 w-4 rounded border-paper-deep/40 text-bamboo focus:ring-bamboo/30" @change="toggleSelect(entry.id)" />
+                </div>
+                <div class="mt-0.5 shrink-0 rounded-lg bg-paper-deep/20 p-2">
+                  <component :is="typeIcon(entry.content_type)" class="h-4 w-4 text-ink-soft" />
+                </div>
+                <div class="min-w-0 flex-1">
+                  <div v-if="entry.content_type === 'text' && entry.text_content" class="truncate text-sm text-ink">{{ truncate(entry.text_content, 120) }}</div>
+                  <div v-else-if="entry.content_type === 'image'" class="truncate text-sm text-ink-soft"><span>图片</span></div>
+                  <div v-else-if="entry.content_type === 'file' && entry.file_paths" class="truncate text-sm text-ink-soft"><span>{{ entry.file_paths.join(", ") }}</span></div>
+                  <div class="mt-1 text-xs text-ink-faint">{{ formatTime(entry.created_at) }}</div>
+                </div>
+                <div v-if="entry.is_favorite" class="shrink-0 self-center rounded-md bg-yellow-500/10 px-2 py-0.5 text-xs text-yellow-600">
+                  <Star class="inline-block h-3 w-3 fill-yellow-500" />
+                </div>
               </div>
             </div>
           </div>

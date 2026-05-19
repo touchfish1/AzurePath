@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from "vue";
+import { ref, onMounted, onUnmounted, computed, watch } from "vue";
 import {
   FileUp,
   Download,
@@ -22,6 +22,7 @@ import {
 } from "@/lib/tauri";
 import { formatSize, progressPercent, formatTime } from "@/lib/format";
 import { useFileTransferListeners } from "@/composables/useFileTransfer";
+import { sendSystemNotification } from "@/composables/useNotification";
 
 const transfers = ref<FileTransfer[]>([]);
 const peers = ref<PeerInfo[]>([]);
@@ -33,6 +34,20 @@ const incomingRequest = ref<{ fileId: string; filename: string; size: number; fr
 const downloadingId = ref<string | null>(null);
 
 const { setup: setupFileListeners, teardown: teardownFileListeners } = useFileTransferListeners(transfers, incomingRequest);
+
+// Watch for newly completed transfers and send system notification
+watch(
+  transfers,
+  (newTransfers, oldTransfers) => {
+    for (const t of newTransfers) {
+      const old = oldTransfers?.find((o) => o.id === t.id);
+      if (t.status === "completed" && old && old.status !== "completed") {
+        sendSystemNotification("文件传输完成", `${t.filename} 已成功传输`);
+      }
+    }
+  },
+  { deep: true },
+);
 
 function peerLabel(peerId: string): string {
   const peer = peers.value.find((p) => p.id === peerId);

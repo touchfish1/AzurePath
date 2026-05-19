@@ -11,6 +11,7 @@ import {
   Clipboard,
   Wifi,
   FileUp,
+  Wrench,
 } from "lucide-vue-next";
 
 const route = useRoute();
@@ -33,6 +34,7 @@ const navItems: NavItem[] = [
   { label: "剪贴板", name: "clipboard", path: "/clipboard", icon: Clipboard },
   { label: "网络嗅探", name: "network-sniffer", path: "/network-sniffer", icon: Wifi },
   { label: "文件传输", name: "files", path: "/files", icon: FileUp },
+  { label: "工具箱", name: "toolbox", path: "/toolbox", icon: Wrench },
 ];
 
 function isActive(path: string): boolean {

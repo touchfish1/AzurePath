@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onUnmounted } from "vue";
+import { sendSystemNotification } from "@/composables/useNotification";
 import {
   Play,
   Square,
@@ -151,6 +152,10 @@ async function startScan() {
 
     const unlistenComplete = await onSnifferComplete(() => {
       scanState.value = "completed";
+      sendSystemNotification(
+        "网络扫描完成",
+        `发现 ${devices.value.length} 台在线设备`,
+      );
     });
     unlisteners.push(unlistenComplete);
 
