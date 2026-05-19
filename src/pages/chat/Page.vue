@@ -23,6 +23,7 @@ import {
   type StoredMessage,
   type PeerInfo,
   type FileTransfer,
+  type FileSendResult,
 } from "@/lib/tauri";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -247,14 +248,16 @@ async function sendFileMessage() {
   transfers.value.unshift(pendingTransfer);
 
   try {
+    let result: FileSendResult;
     if (selectedPeerId.value === "*") {
-      await fileBroadcast(path);
+      result = await fileBroadcast(path);
       pendingTransfer.status = "broadcasting";
     } else {
-      const fileId = await fileSend(selectedPeerId.value, path);
-      pendingTransfer.id = fileId;
+      result = await fileSend(selectedPeerId.value, path);
+      pendingTransfer.id = result.file_id;
       pendingTransfer.status = "transferring";
     }
+    pendingTransfer.size = result.file_size;
     filePath.value = "";
     showFileInput.value = false;
   } catch (e) {

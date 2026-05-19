@@ -320,14 +320,19 @@ export function chatHistory(limit?: number): Promise<StoredMessage[]> {
   return invoke<StoredMessage[]>("chat_history", { limit });
 }
 
-/** Send a file to a peer. Returns the file transfer ID. */
-export function fileSend(target: string, path: string): Promise<string> {
-  return invoke<string>("file_send", { target, path });
+export interface FileSendResult {
+  file_id: string;
+  file_size: number;
 }
 
-/** Broadcast a file to all connected peers. Returns the broadcast file ID. */
-export function fileBroadcast(path: string): Promise<string> {
-  return invoke<string>("file_broadcast", { path });
+/** Send a file to a peer. Returns the file transfer ID and size. */
+export function fileSend(target: string, path: string): Promise<FileSendResult> {
+  return invoke<FileSendResult>("file_send", { target, path });
+}
+
+/** Broadcast a file to all connected peers. Returns the broadcast file ID and size. */
+export function fileBroadcast(path: string): Promise<FileSendResult> {
+  return invoke<FileSendResult>("file_broadcast", { path });
 }
 
 /** Accept an incoming file transfer. */

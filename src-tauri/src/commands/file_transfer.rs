@@ -1,11 +1,18 @@
 use crate::core::connection::IncomingFrame;
 use crate::core::file_transfer::{FileResponseInfo, FileTransferService};
 use crate::types::file_transfer::FileTransfer;
+use serde::Serialize;
 use std::sync::OnceLock;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::oneshot;
 use uuid::Uuid;
+
+#[derive(Serialize)]
+pub struct FileSendResult {
+    pub file_id: String,
+    pub file_size: u64,
+}
 
 static FILE_SVC: OnceLock<Arc<FileTransferService>> = OnceLock::new();
 
@@ -142,7 +149,7 @@ pub(crate) async fn set_file_conn_mgr(mgr: Arc<crate::core::connection::Connecti
 pub async fn file_send(
     target: String,
     path: String,
-) -> Result<String, String> {
+) -> Result<FileSendResult, String> {
     let svc = FILE_SVC.get().ok_or("File transfer not initialized")?;
 
     // Get file metadata
@@ -216,7 +223,7 @@ pub async fn file_send(
     )
     .await;
 
-    Ok(file_id)
+    Ok(FileSendResult { file_id, file_size })
 }
 
 #[tauri::command]
@@ -292,7 +299,7 @@ pub async fn file_list() -> Result<Vec<FileTransfer>, String> {
 }
 
 #[tauri::command]
-pub async fn file_broadcast(path: String) -> Result<String, String> {
+pub async fn file_broadcast(path: String) -> Result<FileSendResult, String> {
     let svc = FILE_SVC.get().ok_or("File transfer not initialized")?;
 
     let file_path = std::path::PathBuf::from(&path);
@@ -325,5 +332,5 @@ pub async fn file_broadcast(path: String) -> Result<String, String> {
         })
         .await;
 
-    Ok(file_id)
+    Ok(FileSendResult { file_id, file_size })
 }

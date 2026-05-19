@@ -114,12 +114,12 @@ onUnmounted(() => {
 async function handleSend() {
   if (!selectedPeerId.value || !selectedFilePath.value) return;
   try {
-    const fileId = await fileSend(selectedPeerId.value, selectedFilePath.value);
+    const result = await fileSend(selectedPeerId.value, selectedFilePath.value);
     transfers.value.unshift({
-      id: fileId,
+      id: result.file_id,
       filename: selectedFilePath.value.split("/").pop() || selectedFilePath.value.split("\\").pop() || "unknown",
       path: selectedFilePath.value,
-      size: 0,
+      size: result.file_size,
       received: 0,
       status: "transferring",
       peer_id: selectedPeerId.value,
