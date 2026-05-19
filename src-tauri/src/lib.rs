@@ -30,6 +30,7 @@ pub fn run() {
             commands::file_transfer::file_reject,
             commands::file_transfer::file_list,
             commands::file_transfer::file_broadcast,
+            commands::file_transfer::get_file_download_url,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

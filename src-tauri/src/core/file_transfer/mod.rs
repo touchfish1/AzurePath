@@ -3,6 +3,7 @@ mod sender;
 
 use crate::core::connection::ConnectionManager;
 use crate::types::chat::Frame;
+use tauri::Emitter;
 use crate::types::file_transfer::FileTransfer;
 pub use receiver::FileReceiver;
 pub use sender::FileSender;
@@ -114,6 +115,7 @@ impl FileTransferService {
             peer_id: peer_id.to_string(),
             is_incoming: false,
             created_at: chrono::Utc::now().to_rfc3339(),
+            download_url: None,
         };
         self.transfers.lock().await.insert(file_id.to_string(), transfer);
 
@@ -124,9 +126,9 @@ impl FileTransferService {
         let peer_addr = peer_addr.to_string();
         let conn_mgr = self.conn_mgr.clone();
         let peer_id = peer_id.to_string();
+        let filename_owned = filename.to_string();
 
         tokio::spawn(async move {
-            // One-shot progress reporting before transfer
             let result = sender
                 .send_file(&peer_addr, data_port, &tid, &path)
                 .await;
@@ -145,8 +147,34 @@ impl FileTransferService {
             }
             drop(t);
 
-            // Send file_complete / file_ack frames over chat connection
             if result.is_ok() {
+                // Register with file server for download URL
+                let path_str = path.to_string_lossy().to_string();
+                if let Some(srv) = crate::commands::file_transfer::file_server_handle() {
+                    srv.register_file(&tid, &path_str);
+                    let download_url = srv.download_url(&tid, &filename_owned);
+
+                    // Set download URL on transfer
+                    let mut t2 = transfers.lock().await;
+                    if let Some(ft) = t2.get_mut(&tid) {
+                        ft.download_url = Some(download_url.clone());
+                    }
+                    drop(t2);
+
+                    // Emit file:complete event to frontend
+                    if let Some(app) = crate::commands::file_transfer::app_handle() {
+                        let _ = app.emit(
+                            "file:complete",
+                            serde_json::json!({
+                                "fileId": tid,
+                                "path": path_str,
+                                "downloadUrl": download_url,
+                            }),
+                        );
+                    }
+                }
+
+                // Send file_complete frame over chat connection
                 if let Some(mgr) = conn_mgr.lock().await.as_ref() {
                     if !peer_id.is_empty() {
                         let _ = mgr
@@ -193,6 +221,7 @@ impl FileTransferService {
             peer_id: peer_id.to_string(),
             is_incoming: true,
             created_at: chrono::Utc::now().to_rfc3339(),
+            download_url: None,
         };
         self.transfers.lock().await.insert(file_id.to_string(), transfer);
     }
@@ -230,6 +259,20 @@ impl FileTransferService {
         let mut list: Vec<FileTransfer> = transfers.values().cloned().collect();
         list.sort_by(|a, b| b.created_at.cmp(&a.created_at));
         list
+    }
+
+    /// Get filename for a transfer.
+    pub async fn get_filename(&self, file_id: &str) -> Option<String> {
+        let transfers = self.transfers.lock().await;
+        transfers.get(file_id).map(|t| t.filename.clone())
+    }
+
+    /// Set download URL on a transfer.
+    pub async fn set_download_url(&self, file_id: &str, url: &str) {
+        let mut transfers = self.transfers.lock().await;
+        if let Some(ft) = transfers.get_mut(file_id) {
+            ft.download_url = Some(url.to_string());
+        }
     }
 
     /// Register a broadcast file (sent to all peers).

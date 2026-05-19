@@ -283,6 +283,7 @@ export interface FileTransfer {
   peer_id: string;
   is_incoming: boolean;
   created_at: string;
+  download_url?: string;
 }
 
 /** Initialize all LAN services. */
@@ -323,6 +324,7 @@ export function chatHistory(limit?: number): Promise<StoredMessage[]> {
 export interface FileSendResult {
   file_id: string;
   file_size: number;
+  download_url?: string;
 }
 
 /** Send a file to a peer. Returns the file transfer ID and size. */
@@ -350,6 +352,11 @@ export function fileList(): Promise<FileTransfer[]> {
   return invoke<FileTransfer[]>("file_list");
 }
 
+/** Get download URL for a completed file transfer. */
+export function getFileDownloadUrl(fileId: string): Promise<string> {
+  return invoke<string>("get_file_download_url", { fileId });
+}
+
 // Event listeners
 export function onPeerList(cb: (peers: PeerInfo[]) => void): Promise<UnlistenFn> {
   return listen<PeerInfo[]>("peer:list", (event) => cb(event.payload));
@@ -371,7 +378,7 @@ export function onFileProgress(cb: (payload: { fileId: string; received: number;
   return listen("file:progress", (event) => cb(event.payload as any));
 }
 
-export function onFileComplete(cb: (payload: { fileId: string; path: string }) => void): Promise<UnlistenFn> {
+export function onFileComplete(cb: (payload: { fileId: string; path: string; downloadUrl?: string }) => void): Promise<UnlistenFn> {
   return listen("file:complete", (event) => cb(event.payload as any));
 }
 

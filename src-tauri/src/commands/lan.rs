@@ -14,7 +14,7 @@ pub async fn lan_init(app: AppHandle) -> Result<(), String> {
     crate::commands::file_transfer::file_transfer_init(app.clone()).await?;
 
     // 3. Wire connection manager into file transfer service for progress reporting
-    crate::commands::file_transfer::set_file_conn_mgr(conn_mgr.clone());
+    crate::commands::file_transfer::set_file_conn_mgr(conn_mgr.clone()).await;
 
     // 4. Start chat service (subscribes to connection frames)
     crate::commands::chat::chat_init(app.clone()).await?;

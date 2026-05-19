@@ -11,4 +11,6 @@ pub struct FileTransfer {
     pub peer_id: String,
     pub is_incoming: bool,
     pub created_at: String,
+    #[serde(default)]
+    pub download_url: Option<String>,
 }

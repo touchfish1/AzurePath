@@ -12,6 +12,7 @@ import {
   fileAccept,
   fileReject,
   fileList,
+  getFileDownloadUrl,
   discoveryPeers,
   onChatMessage,
   onPeerList,
@@ -150,12 +151,13 @@ onMounted(async () => {
     }
   });
 
-  unlistenFileComplete = await onFileComplete((p) => {
+  unlistenFileComplete = await onFileComplete(async (p) => {
     const t = transfers.value.find((x) => x.id === p.fileId);
     if (t) {
       t.status = "completed";
       t.received = t.size;
       t.path = p.path;
+      t.download_url = p.downloadUrl;
     }
   });
 
@@ -232,37 +234,62 @@ async function sendFileMessage() {
   sendingFile.value = true;
   const filename = path.split("/").pop() || path.split("\\").pop() || "unknown";
   const targetPeer = selectedPeerId.value === "*" ? "*" : selectedPeerId.value;
+  const tempId = "pending-" + Date.now();
+  let downloadUrl: string | undefined;
 
-  // Show immediate visual feedback in the message area
-  const pendingTransfer: FileTransfer = {
-    id: "pending-" + Date.now(),
+  // Add entry to array immediately so it shows up in the UI
+  transfers.value.unshift({
+    id: tempId,
     filename,
     path,
     size: 0,
     received: 0,
-    status: selectedPeerId.value === "*" ? "broadcasting" : "pending",
+    status: "sending",
     peer_id: targetPeer,
     is_incoming: false,
     created_at: new Date().toISOString(),
-  };
-  transfers.value.unshift(pendingTransfer);
+  });
 
   try {
     let result: FileSendResult;
+    let status: string;
+    let id: string;
+
     if (selectedPeerId.value === "*") {
       result = await fileBroadcast(path);
-      pendingTransfer.status = "broadcasting";
+      id = tempId; // keep tempId for broadcast (real ID created per-peer on accept)
+      status = "broadcasting";
+      downloadUrl = result.download_url;
     } else {
       result = await fileSend(selectedPeerId.value, path);
-      pendingTransfer.id = result.file_id;
-      pendingTransfer.status = "transferring";
+      id = result.file_id;
+      status = "transferring";
+      downloadUrl = result.download_url;
     }
-    pendingTransfer.size = result.file_size;
+
+    // Replace entire entry in reactive array (triggers Vue reactivity)
+    const replaceIdx = transfers.value.findIndex(t => t.id === tempId);
+    if (replaceIdx >= 0) {
+      transfers.value[replaceIdx] = {
+        id, filename, path,
+        size: result.file_size, received: 0,
+        status, peer_id: targetPeer,
+        is_incoming: false,
+        created_at: new Date().toISOString(),
+        download_url: downloadUrl,
+      };
+    }
     filePath.value = "";
     showFileInput.value = false;
   } catch (e) {
     console.error("Failed to send file:", e);
-    pendingTransfer.status = "error";
+    const errIdx = transfers.value.findIndex(t => t.id === tempId);
+    if (errIdx >= 0) {
+      transfers.value[errIdx] = {
+        ...transfers.value[errIdx],
+        status: "error",
+      };
+    }
   } finally {
     sendingFile.value = false;
   }
@@ -311,8 +338,24 @@ function statusClass(status: string): string {
   if (status === "completed") return "bg-bamboo/10 text-bamboo";
   if (status === "transferring") return "bg-blue-100 text-blue-600";
   if (status === "broadcasting") return "bg-purple-100 text-purple-600";
+  if (status === "sending") return "bg-gray-100 text-gray-500";
   if (status.includes("error")) return "bg-red-100 text-red-600";
   return "bg-yellow-100 text-yellow-600";
+}
+
+async function copyDownloadUrl(t: FileTransfer) {
+  if (!t.download_url) return;
+  try {
+    await navigator.clipboard.writeText(t.download_url);
+    // Brief visual feedback
+    const btn = document.getElementById("copy-btn-" + t.id);
+    if (btn) {
+      btn.textContent = "已复制!";
+      setTimeout(() => { btn.textContent = "复制下载链接"; }, 2000);
+    }
+  } catch (e) {
+    console.error("Failed to copy URL:", e);
+  }
 }
 </script>
 
@@ -446,7 +489,7 @@ function statusClass(status: string): string {
                   class="inline-block rounded-full px-2 py-0.5 text-xs font-medium"
                   :class="statusClass(t.status)"
                 >
-                  {{ t.status === 'completed' ? '已完成' : t.status === 'transferring' ? '传输中' : t.status === 'broadcasting' ? '广播中' : t.status.includes('error') ? '失败' : '等待接收' }}
+                  {{ t.status === 'completed' ? '已完成' : t.status === 'transferring' ? '传输中' : t.status === 'broadcasting' ? '广播中' : t.status === 'sending' ? '发送中' : t.status.includes('error') ? '失败' : '等待接收' }}
                 </span>
                 <span class="text-xs text-ink-faint">
                   {{ formatSize(t.received) }} / {{ formatSize(t.size) }}
@@ -460,6 +503,15 @@ function statusClass(status: string): string {
               </div>
               <div class="mt-1 text-xs text-ink-faint">
                 {{ formatTime(t.created_at) }}
+              </div>
+              <div v-if="t.download_url" class="mt-2">
+                <button
+                  :id="'copy-btn-' + t.id"
+                  class="inline-flex items-center gap-1 rounded-md bg-bamboo/10 px-2.5 py-1 text-xs font-medium text-bamboo transition-colors hover:bg-bamboo/20"
+                  @click="copyDownloadUrl(t)"
+                >
+                  复制下载链接
+                </button>
               </div>
             </div>
           </div>
