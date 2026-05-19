@@ -253,6 +253,7 @@ dependencies = [
  "chrono",
  "encoding_rs",
  "rand",
+ "regex",
  "rusqlite",
  "serde",
  "serde_json",
