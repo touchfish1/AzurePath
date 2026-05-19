@@ -12,7 +12,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_window_state::Builder::new().build())
-        .plugin(tauri_plugin_autostart::init())
+        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None::<Vec<&'static str>>))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
@@ -93,12 +93,6 @@ pub fn run() {
 
             Ok(())
         })
-        .single_instance(|app, _argv, _cwd| {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
-        })
         .invoke_handler(tauri::generate_handler![
             // Phase 1
             commands::ping::ping_start,
@@ -172,12 +166,6 @@ pub fn run() {
             commands::preset::save_preset,
             commands::preset::load_presets,
             commands::preset::delete_preset,
-            // Phase 11 — SSH Terminal
-            commands::ssh::ssh_connect,
-            commands::ssh::ssh_disconnect,
-            commands::ssh::ssh_send_input,
-            commands::ssh::ssh_resize,
-            commands::ssh::ssh_list_sessions,
             // Phase 12 — Monitor
             commands::monitor::monitor_start,
             commands::monitor::monitor_stop,

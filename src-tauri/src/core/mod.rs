@@ -17,7 +17,6 @@ pub mod port_scan;
 pub mod preset;
 pub mod settings;
 pub mod speedtest;
-pub mod ssh;
 pub mod ssl_check;
 pub mod traceroute;
 pub mod utils;

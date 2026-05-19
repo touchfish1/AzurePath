@@ -13,7 +13,6 @@ pub mod network_sniffer;
 pub mod port_scan;
 pub mod preset;
 pub mod speedtest;
-pub mod ssh;
 pub mod ssl_check;
 pub mod traceroute;
 pub mod whois;

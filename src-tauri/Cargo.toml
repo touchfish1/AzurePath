@@ -30,6 +30,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tauri-plugin-updater = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-global-shortcut = "2"
+tauri-plugin-window-state = "2"
+tauri-plugin-autostart = "2"
 futures = "0.3"
 
 [dev-dependencies]

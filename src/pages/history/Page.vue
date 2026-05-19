@@ -16,10 +16,12 @@ import {
   Clock,
   Search,
   Trash2,
+  Download,
   ArrowUp,
   ArrowDown,
 } from "lucide-vue-next";
 import { formatTime, truncate } from "@/lib/format";
+import { exportAsJson, exportAsCsv } from "@/lib/export";
 import { useToastStore } from "@/stores/toast";
 import Button from "@/components/ui/button/Button.vue";
 import {
@@ -235,6 +237,30 @@ async function clearAll() {
   allEntries.value = [];
   selectedIds.value = new Set();
 }
+
+// ─── Export ──────────────────────────────────────────────────────
+const exportFormat = ref<"json" | "csv">("json");
+
+function exportHistory() {
+  const entries = sortedEntries.value;
+  if (entries.length === 0) {
+    toast.error("没有可导出的记录");
+    return;
+  }
+  if (exportFormat.value === "json") {
+    exportAsJson(entries, "activity_history");
+  } else if (exportFormat.value === "csv") {
+    const rows = entries.map((e) => ({
+      id: e.id,
+      action_type: e.action_type || "",
+      description: e.description || "",
+      metadata: e.metadata || "",
+      created_at: e.created_at,
+    }));
+    exportAsCsv(rows, "activity_history");
+  }
+  toast.add("success", "导出成功");
+}
 </script>
 
 <template>
@@ -267,14 +293,32 @@ async function clearAll() {
         </button>
       </div>
 
-      <div v-if="activeTab !== 'timeline'" class="relative flex items-center">
-        <Search class="absolute left-2.5 h-3.5 w-3.5 text-ink-faint" />
-        <input
-          v-model="searchQuery"
-          type="text"
-          placeholder="搜索剪贴板..."
-          class="h-8 rounded-lg border border-paper-deep/30 bg-paper-warm/30 pl-8 pr-3 text-xs text-ink outline-none transition-colors placeholder:text-ink-faint focus:border-bamboo/40 focus:bg-paper-warm/50"
-        />
+      <div v-if="activeTab !== 'timeline'" class="flex items-center gap-2">
+        <div class="relative flex items-center">
+          <Search class="absolute left-2.5 h-3.5 w-3.5 text-ink-faint" />
+          <input
+            v-model="searchQuery"
+            type="text"
+            placeholder="搜索剪贴板..."
+            class="h-8 rounded-lg border border-paper-deep/30 bg-paper-warm/30 pl-8 pr-3 text-xs text-ink outline-none transition-colors placeholder:text-ink-faint focus:border-bamboo/40 focus:bg-paper-warm/50"
+          />
+        </div>
+        <div class="flex rounded-lg border border-paper-deep/30 overflow-hidden">
+          <button
+            v-for="fmt in (['json', 'csv'] as const)"
+            :key="fmt"
+            class="px-2.5 py-1 text-xs font-medium transition-colors uppercase"
+            :class="exportFormat === fmt ? 'bg-bamboo/15 text-bamboo' : 'text-ink-faint hover:text-ink hover:bg-paper-deep/20'"
+            @click="exportFormat = fmt"
+          >{{ fmt }}</button>
+        </div>
+        <button
+          class="flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium text-ink-faint transition-colors hover:text-ink hover:bg-paper-deep/20"
+          @click="exportHistory"
+        >
+          <Download class="h-3.5 w-3.5" />
+          导出
+        </button>
       </div>
     </div>
 

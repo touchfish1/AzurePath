@@ -9,12 +9,15 @@ import {
   Copy,
   Check,
   Wifi,
+  FileJson,
+  Key,
+  Clock,
 } from "lucide-vue-next";
 import Button from "@/components/ui/button/Button.vue";
 import QRCode from "qrcode";
 
 // ─── Tab System ───────────────────────────────────────────────
-type ToolTab = "subnet" | "base64" | "url" | "hash" | "port" | "wifi";
+type ToolTab = "subnet" | "base64" | "url" | "hash" | "port" | "wifi" | "json" | "jwt" | "timestamp";
 
 interface ToolTabDef {
   key: ToolTab;
@@ -29,6 +32,9 @@ const tabs: ToolTabDef[] = [
   { key: "hash", label: "Hash", icon: Fingerprint },
   { key: "port", label: "端口速查", icon: Search },
   { key: "wifi", label: "WiFi QR", icon: Wifi },
+  { key: "json", label: "JSON", icon: FileJson },
+  { key: "jwt", label: "JWT", icon: Key },
+  { key: "timestamp", label: "时间戳", icon: Clock },
 ];
 
 const activeTab = ref<ToolTab>("subnet");
@@ -536,6 +542,191 @@ async function generateWifiQr() {
     wifiQrGenerating.value = false;
   }
 }
+
+// ─── 7. JSON Formatter ─────────────────────────────────────────
+const jsonInput = ref("");
+const jsonOutput = ref("");
+const jsonError = ref("");
+const jsonCopied = ref(false);
+
+function formatJson() {
+  jsonError.value = "";
+  jsonOutput.value = "";
+  const input = jsonInput.value.trim();
+  if (!input) {
+    jsonError.value = "请输入 JSON";
+    return;
+  }
+  try {
+    const parsed = JSON.parse(input);
+    jsonOutput.value = JSON.stringify(parsed, null, 2);
+  } catch (e) {
+    jsonError.value = `无效 JSON: ${e}`;
+  }
+}
+
+function compressJson() {
+  jsonError.value = "";
+  jsonOutput.value = "";
+  const input = jsonInput.value.trim();
+  if (!input) {
+    jsonError.value = "请输入 JSON";
+    return;
+  }
+  try {
+    const parsed = JSON.parse(input);
+    jsonOutput.value = JSON.stringify(parsed);
+  } catch (e) {
+    jsonError.value = `无效 JSON: ${e}`;
+  }
+}
+
+function copyJson() {
+  if (!jsonOutput.value) return;
+  navigator.clipboard.writeText(jsonOutput.value).then(() => {
+    jsonCopied.value = true;
+    setTimeout(() => { jsonCopied.value = false; }, 2000);
+  });
+}
+
+// ─── 8. JWT Decoder ────────────────────────────────────────────
+const jwtInput = ref("");
+const jwtHeader = ref("");
+const jwtPayload = ref("");
+const jwtError = ref("");
+const jwtCopied = ref(false);
+
+function decodeJwt() {
+  jwtError.value = "";
+  jwtHeader.value = "";
+  jwtPayload.value = "";
+  const token = jwtInput.value.trim();
+  if (!token) {
+    jwtError.value = "请输入 JWT Token";
+    return;
+  }
+  const parts = token.split(".");
+  if (parts.length !== 3) {
+    jwtError.value = "无效 JWT：需要三部分（header.payload.signature）";
+    return;
+  }
+  try {
+    // Decode header
+    const headerJson = atob(base64UrlDecode(parts[0]));
+    const headerParsed = JSON.parse(headerJson);
+    jwtHeader.value = JSON.stringify(headerParsed, null, 2);
+
+    // Decode payload
+    const payloadJson = atob(base64UrlDecode(parts[1]));
+    const payloadParsed = JSON.parse(payloadJson);
+    jwtPayload.value = JSON.stringify(payloadParsed, null, 2);
+  } catch (e) {
+    jwtError.value = `解码失败: ${e}`;
+  }
+}
+
+function base64UrlDecode(str: string): string {
+  // Replace URL-safe chars and pad
+  let base64 = str.replace(/-/g, "+").replace(/_/g, "/");
+  while (base64.length % 4 !== 0) {
+    base64 += "=";
+  }
+  return base64;
+}
+
+function jwtHasExpiry(): string | null {
+  try {
+    if (!jwtPayload.value) return null;
+    const payload = JSON.parse(jwtPayload.value);
+    if (payload.exp) {
+      const expDate = new Date(payload.exp * 1000);
+      const now = new Date();
+      const diff = expDate.getTime() - now.getTime();
+      const isExpired = diff < 0;
+      const relative = isExpired
+        ? `已过期 ${Math.abs(Math.round(diff / 1000 / 60))} 分钟前`
+        : `剩余 ${Math.round(diff / 1000 / 60)} 分钟`;
+      return `${expDate.toLocaleString()} (${relative})`;
+    }
+    return "无过期时间 (exp)";
+  } catch {
+    return null;
+  }
+}
+
+function copyJwt() {
+  const text = `Header:\n${jwtHeader.value}\n\nPayload:\n${jwtPayload.value}`;
+  if (!text) return;
+  navigator.clipboard.writeText(text).then(() => {
+    jwtCopied.value = true;
+    setTimeout(() => { jwtCopied.value = false; }, 2000);
+  });
+}
+
+// ─── 9. Timestamp Converter ────────────────────────────────────
+const tsInput = ref<number | null>(null);
+const tsResult = ref("");
+const tsRelative = ref("");
+const tsError = ref("");
+
+function convertTimestamp() {
+  tsError.value = "";
+  tsResult.value = "";
+  tsRelative.value = "";
+
+  const val = tsInput.value;
+  if (val === null || val === undefined || isNaN(val)) {
+    tsError.value = "请输入有效的时间戳";
+    return;
+  }
+
+  let ms: number;
+  // Auto-detect: if > 1e11, treat as milliseconds
+  if (val > 1e11) {
+    ms = val;
+  } else {
+    ms = val * 1000;
+  }
+
+  const date = new Date(ms);
+  if (isNaN(date.getTime())) {
+    tsError.value = "无效的时间戳";
+    return;
+  }
+
+  // Format: YYYY-MM-DD HH:mm:ss in local timezone
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  const seconds = String(date.getSeconds()).padStart(2, "0");
+  tsResult.value = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+
+  // Relative time
+  const now = Date.now();
+  const diffMs = ms - now;
+  const absDiffMs = Math.abs(diffMs);
+  const secondsDiff = Math.round(absDiffMs / 1000);
+  const minutesDiff = Math.round(secondsDiff / 60);
+  const hoursDiff = Math.round(minutesDiff / 60);
+  const daysDiff = Math.round(hoursDiff / 24);
+
+  let relative = "";
+  if (diffMs > 0) {
+    if (daysDiff > 0) relative = `${daysDiff} 天后`;
+    else if (hoursDiff > 0) relative = `${hoursDiff} 小时后`;
+    else if (minutesDiff > 0) relative = `${minutesDiff} 分钟后`;
+    else relative = `${secondsDiff} 秒后`;
+  } else {
+    if (daysDiff > 0) relative = `${daysDiff} 天前`;
+    else if (hoursDiff > 0) relative = `${hoursDiff} 小时前`;
+    else if (minutesDiff > 0) relative = `${minutesDiff} 分钟前`;
+    else relative = `${secondsDiff} 秒前`;
+  }
+  tsRelative.value = relative;
+}
+
 </script>
 
 <template>
@@ -869,6 +1060,132 @@ async function generateWifiQr() {
             <div class="flex items-center justify-between border-t border-paper-deep/10 pt-3">
               <span class="text-xs font-medium text-ink-soft">描述</span>
               <span class="text-sm text-right text-ink max-w-xs">{{ portResult.description }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- JSON Formatter -->
+      <div v-if="activeTab === 'json'" class="max-w-xl">
+        <h3 class="text-lg font-display font-bold text-ink">JSON 格式化</h3>
+        <p class="mt-1 text-sm text-ink-faint">格式化、压缩和验证 JSON 数据。</p>
+
+        <div class="mt-5 space-y-4">
+          <div>
+            <label class="mb-1.5 block text-xs font-medium text-ink-soft">输入 JSON</label>
+            <textarea
+              v-model="jsonInput"
+              rows="6"
+              placeholder='{"key": "value"}'
+              class="w-full rounded-lg border border-paper-deep/40 bg-paper-warm/50 px-3 py-2 text-sm text-ink outline-none transition-colors placeholder:text-ink-faint/40 focus:border-bamboo/40 focus:bg-paper-warm/80 resize-y font-mono"
+            />
+          </div>
+          <div class="flex gap-2">
+            <Button @click="formatJson">格式化</Button>
+            <Button variant="outline" @click="compressJson">压缩</Button>
+          </div>
+
+          <p v-if="jsonError" class="text-sm text-red-500">{{ jsonError }}</p>
+
+          <div v-if="jsonOutput">
+            <div class="mb-1.5 flex items-center justify-between">
+              <label class="text-xs font-medium text-ink-soft">结果</label>
+              <button
+                class="flex items-center gap-1 rounded-md px-2 py-1 text-xs transition-colors"
+                :class="jsonCopied ? 'text-bamboo bg-bamboo/10' : 'text-ink-faint hover:text-ink hover:bg-paper-deep/30'"
+                @click="copyJson"
+              >
+                <Copy v-if="!jsonCopied" class="h-3 w-3" />
+                <Check v-else class="h-3 w-3" />
+                {{ jsonCopied ? '已复制' : '复制' }}
+              </button>
+            </div>
+            <div class="rounded-xl border border-paper-deep/20 bg-paper-warm/30 p-4 max-h-96 overflow-auto">
+              <pre class="whitespace-pre-wrap break-all text-sm text-ink font-mono">{{ jsonOutput }}</pre>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- JWT Decoder -->
+      <div v-if="activeTab === 'jwt'" class="max-w-xl">
+        <h3 class="text-lg font-display font-bold text-ink">JWT 解码器</h3>
+        <p class="mt-1 text-sm text-ink-faint">解码 JSON Web Token 的 Header 和 Payload。</p>
+
+        <div class="mt-5 space-y-4">
+          <div>
+            <label class="mb-1.5 block text-xs font-medium text-ink-soft">JWT Token</label>
+            <textarea
+              v-model="jwtInput"
+              rows="3"
+              placeholder="eyJhbGciOiJIUzI1NiIs..."
+              class="w-full rounded-lg border border-paper-deep/40 bg-paper-warm/50 px-3 py-2 text-sm text-ink outline-none transition-colors placeholder:text-ink-faint/40 focus:border-bamboo/40 focus:bg-paper-warm/80 resize-y font-mono"
+            />
+          </div>
+          <Button @click="decodeJwt">解码</Button>
+
+          <p v-if="jwtError" class="text-sm text-red-500">{{ jwtError }}</p>
+
+          <div v-if="jwtHeader">
+            <div class="mb-1.5 flex items-center justify-between">
+              <label class="text-xs font-medium text-ink-soft">Header</label>
+              <button
+                class="flex items-center gap-1 rounded-md px-2 py-1 text-xs transition-colors"
+                :class="jwtCopied ? 'text-bamboo bg-bamboo/10' : 'text-ink-faint hover:text-ink hover:bg-paper-deep/30'"
+                @click="copyJwt"
+              >
+                <Copy v-if="!jwtCopied" class="h-3 w-3" />
+                <Check v-else class="h-3 w-3" />
+                {{ jwtCopied ? '已复制' : '复制' }}
+              </button>
+            </div>
+            <div class="rounded-xl border border-paper-deep/20 bg-paper-warm/30 p-4 mb-4">
+              <pre class="whitespace-pre-wrap break-all text-sm text-ink font-mono">{{ jwtHeader }}</pre>
+            </div>
+
+            <div class="mb-1.5 flex items-center justify-between">
+              <label class="text-xs font-medium text-ink-soft">Payload</label>
+            </div>
+            <div class="rounded-xl border border-paper-deep/20 bg-paper-warm/30 p-4">
+              <pre class="whitespace-pre-wrap break-all text-sm text-ink font-mono">{{ jwtPayload }}</pre>
+            </div>
+
+            <div v-if="jwtPayload" class="mt-3 rounded-lg border border-paper-deep/20 bg-paper-warm/30 px-4 py-3 text-sm">
+              <span class="text-xs font-medium text-ink-soft">过期信息：</span>
+              <span class="text-ink">{{ jwtHasExpiry() || '解析失败' }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Timestamp Converter -->
+      <div v-if="activeTab === 'timestamp'" class="max-w-xl">
+        <h3 class="text-lg font-display font-bold text-ink">时间戳转换</h3>
+        <p class="mt-1 text-sm text-ink-faint">将 Unix 时间戳转换为可读的日期时间格式。支持秒和毫秒。</p>
+
+        <div class="mt-5 space-y-4">
+          <div>
+            <label class="mb-1.5 block text-xs font-medium text-ink-soft">Unix 时间戳</label>
+            <input
+              v-model.number="tsInput"
+              type="number"
+              placeholder="如 1700000000 或 1700000000000"
+              class="w-full rounded-lg border border-paper-deep/40 bg-paper-warm/50 px-3 py-2 text-sm text-ink outline-none transition-colors placeholder:text-ink-faint/40 focus:border-bamboo/40 focus:bg-paper-warm/80 font-mono"
+              @keyup.enter="convertTimestamp"
+            />
+          </div>
+          <Button @click="convertTimestamp">转换</Button>
+
+          <p v-if="tsError" class="text-sm text-red-500">{{ tsError }}</p>
+
+          <div v-if="tsResult" class="space-y-3 rounded-xl border border-paper-deep/20 bg-paper-warm/30 p-5">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-medium text-ink-soft">本地时间</span>
+              <span class="text-sm font-mono text-ink">{{ tsResult }}</span>
+            </div>
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-medium text-ink-soft">相对时间</span>
+              <span class="text-sm text-ink">{{ tsRelative }}</span>
             </div>
           </div>
         </div>

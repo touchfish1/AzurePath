@@ -28,6 +28,7 @@ import {
   type FileSendResult,
 } from "@/lib/tauri";
 import { formatTime, formatSize, progressPercent } from "@/lib/format";
+import { exportAsJson, exportAsCsv, exportAsTxt } from "@/lib/export";
 import { useFileTransferListeners } from "@/composables/useFileTransfer";
 import { sendSystemNotification } from "@/composables/useNotification";
 import type { UnlistenFn } from "@tauri-apps/api/event";
@@ -140,6 +141,39 @@ async function clearAllHistory() {
   } catch (e) {
     toast.error(`清空历史记录失败: ${e}`);
   }
+}
+
+// ─── Export ──────────────────────────────────────────────────────
+const exportFormat = ref<"json" | "csv" | "txt">("json");
+
+function exportChatHistory() {
+  const msgs = historyMessages.value;
+  if (msgs.length === 0) {
+    toast.error("没有可导出的记录");
+    return;
+  }
+  if (exportFormat.value === "json") {
+    exportAsJson(msgs, "chat_history");
+  } else if (exportFormat.value === "csv") {
+    const rows = msgs.map((m) => ({
+      id: m.id,
+      peer_name: m.peer_name,
+      peer_ip: m.peer_ip,
+      content: m.content,
+      is_incoming: m.is_incoming,
+      is_broadcast: m.is_broadcast,
+      created_at: m.created_at,
+    }));
+    exportAsCsv(rows, "chat_history");
+  } else if (exportFormat.value === "txt") {
+    let text = "=== AzurePath Chat Export ===\n\n";
+    for (const msg of msgs) {
+      const direction = msg.is_incoming ? "接收" : "发送";
+      text += `[${msg.created_at}] ${direction} ${msg.peer_name} (${msg.peer_ip}): ${msg.content}\n`;
+    }
+    exportAsTxt(text, "chat_history");
+  }
+  toast.add("success", "导出成功");
 }
 
 onMounted(async () => {
@@ -755,10 +789,25 @@ async function copyDownloadUrl(t: FileTransfer) {
           <!-- Footer -->
           <div class="flex items-center justify-between mt-4 pt-3 border-t border-paper-deep/20">
             <span class="text-xs text-ink-faint">共 {{ historyMessages.length }} 条记录</span>
-            <Button variant="danger" size="sm" @click="clearAllHistory">
-              <Trash2 class="mr-1 h-3.5 w-3.5" />
-              清空全部
-            </Button>
+            <div class="flex items-center gap-2">
+              <div class="flex rounded-lg border border-paper-deep/30 overflow-hidden">
+                <button
+                  v-for="fmt in (['json', 'csv', 'txt'] as const)"
+                  :key="fmt"
+                  class="px-2.5 py-1 text-xs font-medium transition-colors uppercase"
+                  :class="exportFormat === fmt ? 'bg-bamboo/15 text-bamboo' : 'text-ink-faint hover:text-ink hover:bg-paper-deep/20'"
+                  @click="exportFormat = fmt"
+                >{{ fmt }}</button>
+              </div>
+              <Button variant="outline" size="sm" @click="exportChatHistory">
+                <Download class="mr-1 h-3.5 w-3.5" />
+                导出
+              </Button>
+              <Button variant="danger" size="sm" @click="clearAllHistory">
+                <Trash2 class="mr-1 h-3.5 w-3.5" />
+                清空全部
+              </Button>
+            </div>
           </div>
         </div>
       </div>

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { onMounted, watch } from "vue";
-import { Sun, Moon, Monitor, Save } from "lucide-vue-next";
+import { onMounted, watch, ref } from "vue";
+import { Sun, Moon, Monitor, Save, Power } from "lucide-vue-next";
 import Button from "@/components/ui/button/Button.vue";
 import { useSettingsStore } from "@/stores/settings";
 import { useToastStore } from "@/stores/toast";
@@ -10,9 +10,39 @@ const store = useSettingsStore();
 const themeStore = useThemeStore();
 const toast = useToastStore();
 
-onMounted(() => {
+// Autostart state
+const autostartEnabled = ref(false);
+const autostartChecking = ref(true);
+
+onMounted(async () => {
   store.load();
+  // Check autostart status
+  try {
+    const { isEnabled } = await import("@tauri-apps/plugin-autostart");
+    autostartEnabled.value = await isEnabled();
+  } catch {
+    autostartEnabled.value = false;
+  } finally {
+    autostartChecking.value = false;
+  }
 });
+
+async function toggleAutostart() {
+  try {
+    const { enable, disable } = await import("@tauri-apps/plugin-autostart");
+    if (autostartEnabled.value) {
+      await disable();
+      autostartEnabled.value = false;
+      toast.add("success", "已关闭开机自启动");
+    } else {
+      await enable();
+      autostartEnabled.value = true;
+      toast.add("success", "已开启开机自启动");
+    }
+  } catch (e) {
+    toast.add("error", `自启动设置失败: ${e}`);
+  }
+}
 
 // Sync theme changes
 watch(
@@ -98,6 +128,36 @@ const maxItemsOptions = [
           <Monitor class="h-4 w-4" />
           跟随系统
         </button>
+      </div>
+    </div>
+
+    <!-- Autostart -->
+    <div class="noise-bg rounded-xl border border-paper-deep/60 bg-paper p-5 shadow-sm">
+      <h2 class="text-sm font-semibold text-ink mb-4 flex items-center gap-2">
+        <Power class="h-4 w-4 text-bamboo" />
+        启动
+      </h2>
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-sm text-ink">开机自启动</p>
+          <p class="text-xs text-ink-faint mt-0.5">登录时自动启动 AzurePath</p>
+        </div>
+        <label class="relative inline-flex cursor-pointer items-center">
+          <input
+            type="checkbox"
+            :checked="autostartEnabled"
+            :disabled="autostartChecking"
+            class="peer sr-only"
+            @change="toggleAutostart"
+          />
+          <div
+            class="h-6 w-11 rounded-full border border-paper-deep/40 bg-paper-deep/30 transition-colors peer-checked:bg-bamboo peer-focus:ring-2 peer-focus:ring-bamboo/30"
+          >
+            <div
+              class="h-5 w-5 translate-x-0.5 rounded-full bg-white shadow-sm transition-transform peer-checked:translate-x-[22px]"
+            ></div>
+          </div>
+        </label>
       </div>
     </div>
 

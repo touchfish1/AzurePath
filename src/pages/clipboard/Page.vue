@@ -24,6 +24,7 @@ import {
   type ClipboardEntry,
 } from "@/lib/tauri";
 import { formatTime, truncate } from "@/lib/format";
+import { exportAsJson, exportAsCsv, exportAsHtml } from "@/lib/export";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
 const entries = ref<ClipboardEntry[]>([]);
@@ -264,11 +265,40 @@ async function batchDelete() {
   }
 }
 
+const exportFormat = ref<"json" | "csv" | "html">("json");
+
 async function batchExport() {
   const count = selectedIds.value.size;
   if (count === 0) return;
   try {
-    await clipboardExport(Array.from(selectedIds.value), "json");
+    const ids = Array.from(selectedIds.value);
+    const entries = entries.value.filter((e) => ids.includes(e.id));
+
+    if (exportFormat.value === "json") {
+      await clipboardExport(ids, "json");
+    } else if (exportFormat.value === "csv") {
+      const rows = entries.map((e) => ({
+        id: e.id,
+        content_type: e.content_type,
+        text_content: e.text_content || "",
+        image_path: e.image_path || "",
+        file_paths: e.file_paths ? e.file_paths.join("; ") : "",
+        is_favorite: e.is_favorite,
+        created_at: e.created_at,
+      }));
+      exportAsCsv(rows, "clipboard_export");
+    } else if (exportFormat.value === "html") {
+      const rows = entries.map((e) => ({
+        id: e.id,
+        content_type: e.content_type,
+        text_content: e.text_content || "",
+        image_path: e.image_path || "",
+        file_paths: e.file_paths ? e.file_paths.join("; ") : "",
+        is_favorite: e.is_favorite ? "是" : "否",
+        created_at: e.created_at,
+      }));
+      exportAsHtml(rows, Object.keys(rows[0]), "剪贴板导出");
+    }
   } catch (e) {
     toast.error(`批量导出失败: ${e}`);
   }
@@ -337,6 +367,15 @@ async function changeStorageLimit() {
           <Download class="mr-1 h-3.5 w-3.5" />
           批量导出
         </Button>
+        <div class="flex rounded-lg border border-bamboo/20 overflow-hidden">
+          <button
+            v-for="fmt in (['json', 'csv', 'html'] as const)"
+            :key="fmt"
+            class="px-2 py-0.5 text-xs font-medium transition-colors uppercase"
+            :class="exportFormat === fmt ? 'bg-bamboo/15 text-bamboo' : 'text-ink-faint hover:text-ink hover:bg-paper-deep/20'"
+            @click="exportFormat = fmt"
+          >{{ fmt }}</button>
+        </div>
       </div>
       <button
         class="text-xs text-ink-faint hover:text-ink transition-colors"

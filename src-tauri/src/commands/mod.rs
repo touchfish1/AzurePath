@@ -19,7 +19,6 @@ pub mod preset;
 pub mod report;
 pub mod settings;
 pub mod speedtest;
-pub mod ssh;
 pub mod ssl_check;
 pub mod traceroute;
 pub mod whois;

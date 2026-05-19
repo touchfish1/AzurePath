@@ -15,7 +15,6 @@ import {
   FileUp,
   Wrench,
   Magnet,
-  Terminal,
   Gauge,
   Search,
   Settings,
@@ -58,7 +57,6 @@ const navItems: NavItem[] = [
   { label: "文件传输", name: "files", path: "/files", icon: FileUp },
   { label: "工具箱", name: "toolbox", path: "/toolbox", icon: Wrench },
   { label: "WOL 唤醒", name: "wol", path: "/wol", icon: Magnet },
-  { label: "SSH 终端", name: "terminal", path: "/terminal", icon: Terminal },
   { label: "设置", name: "settings", path: "/settings", icon: Settings },
 ];
 
