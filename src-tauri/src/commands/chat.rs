@@ -63,6 +63,9 @@ pub async fn chat_init(app: AppHandle) -> Result<(), String> {
 
                     // Handle file-related frames via the connection
                     crate::commands::file_transfer::handle_frame(&incoming, &app_clone).await;
+
+                    // Handle clipboard sync frames
+                    crate::commands::clipboard::handle_frame(&incoming, &app_clone).await;
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                     eprintln!("[chat] Lagged by {} messages", n);

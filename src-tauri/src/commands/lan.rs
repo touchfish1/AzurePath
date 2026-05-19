@@ -23,6 +23,9 @@ pub async fn lan_init(app: AppHandle) -> Result<(), String> {
     //    This also triggers connection to discovered peers.
     crate::commands::discovery::discovery_start(app.clone()).await?;
 
+    // 6. Start clipboard monitor
+    let _ = crate::commands::clipboard::clipboard_start(app.clone()).await;
+
     println!("[lan] All services initialized successfully");
     let _ = app.emit("lan:ready", serde_json::json!({ "status": "ok" }));
 

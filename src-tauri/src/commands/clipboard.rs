@@ -3,6 +3,7 @@ use crate::types::clipboard::ClipboardEntry;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use tauri::AppHandle;
+use tauri::Emitter;
 use tauri::image::Image;
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
@@ -119,4 +120,20 @@ pub async fn clipboard_copy(id: String, app: AppHandle) -> Result<(), String> {
 pub async fn clipboard_clear() -> Result<(), String> {
     let store = CLIPBOARD_STORE.get().ok_or("Clipboard not initialized")?;
     store.clear()
+}
+
+/// Handle incoming ClipboardSync frames from LAN peers.
+pub(crate) async fn handle_frame(incoming: &crate::core::connection::IncomingFrame, app: &AppHandle) {
+    if let crate::types::chat::Frame::ClipboardSync { entries } = &incoming.frame {
+        let store = match CLIPBOARD_STORE.get() {
+            Some(s) => s,
+            None => return,
+        };
+        for entry in entries {
+            if let Err(e) = store.insert(entry) {
+                eprintln!("[clipboard] Failed to save synced entry: {}", e);
+            }
+        }
+        let _ = app.emit("clipboard:synced", entries);
+    }
 }
