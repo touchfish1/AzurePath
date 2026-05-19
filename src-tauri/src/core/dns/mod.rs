@@ -1,4 +1,6 @@
 use crate::types::dns::{DnsRecord, RecordType};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
 use tokio::net::UdpSocket;
 
 const DNS_SERVER: &str = "8.8.8.8:53";
@@ -113,8 +115,58 @@ async fn resolve_qtype(
 
     buf.truncate(len);
 
+    // Check TC flag (Truncation) — bit 2 of flags field at bytes 2-3
+    // If the response was truncated, retry the query via TCP (RFC 5966)
+    if len >= 12 {
+        let flags = u16::from_be_bytes([buf[2], buf[3]]);
+        if flags & 0x0200 != 0 {
+            let tcp_response = send_query_tcp(&query, server).await?;
+            return parse_dns_response(&tcp_response, target, qtype);
+        }
+    }
+
     // Parse the response
     parse_dns_response(&buf, target, qtype)
+}
+
+/// Send a DNS query over TCP and return the raw response bytes.
+///
+/// DNS over TCP uses a 2-byte length prefix (network byte order) before
+/// the query message, and the response also begins with a 2-byte length.
+async fn send_query_tcp(query: &[u8], server: &str) -> Result<Vec<u8>, String> {
+    let addr = server;
+    let mut stream = TcpStream::connect(addr)
+        .await
+        .map_err(|e| format!("TCP connect to DNS server failed: {}", e))?;
+
+    // Send: 2-byte length (big-endian) + query
+    let len_bytes = (query.len() as u16).to_be_bytes();
+    stream
+        .write_all(&len_bytes)
+        .await
+        .map_err(|e| format!("TCP write length failed: {}", e))?;
+    stream
+        .write_all(query)
+        .await
+        .map_err(|e| format!("TCP write query failed: {}", e))?;
+
+    // Read: 2-byte response length
+    let mut len_buf = [0u8; 2];
+    tokio::time::timeout(std::time::Duration::from_secs(5), stream.read_exact(&mut len_buf))
+        .await
+        .map_err(|_| "TCP DNS read timeout".to_string())?
+        .map_err(|e| format!("TCP read length failed: {}", e))?;
+
+    let resp_len = u16::from_be_bytes(len_buf) as usize;
+
+    // Read the response body
+    let mut resp = vec![0u8; resp_len];
+    tokio::time::timeout(std::time::Duration::from_secs(5), stream.read_exact(&mut resp))
+        .await
+        .map_err(|_| "TCP DNS response read timeout".to_string())?
+        .map_err(|e| format!("TCP read response failed: {}", e))?;
+
+    Ok(resp)
 }
 
 /// Build a raw DNS query message.
@@ -542,6 +594,8 @@ fn compress_ipv6(ip: &str) -> String {
 mod tests {
     use super::*;
     use crate::types::dns::RecordType;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
 
     // -----------------------------------------------------------------------
     // encode_dns_name
@@ -1095,6 +1149,81 @@ mod tests {
         let target = format!("{}.com", label);
         let result = build_dns_query(&target, TYPE_A);
         assert!(result.is_err(), "label over 63 chars should be rejected");
+    }
+
+    // -----------------------------------------------------------------------
+    // send_query_tcp
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_send_query_tcp_invalid_address() {
+        // Attempting to connect to a non-listening port should fail gracefully.
+        let result = send_query_tcp(b"test", "127.0.0.1:1").await;
+        assert!(result.is_err(), "Expected error connecting to port 1");
+    }
+
+    #[tokio::test]
+    async fn test_send_query_tcp_mock_server() {
+        // Spin up a local TCP echo-like mock that responds with a minimal
+        // valid DNS response (header only, no answer records).
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            let (mut stream, _) = tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                listener.accept(),
+            )
+            .await
+            .expect("Mock server accept timed out")
+            .expect("Mock server accept error");
+
+            // Read 2-byte TCP length prefix
+            let mut len_buf = [0u8; 2];
+            stream.read_exact(&mut len_buf).await.unwrap();
+            let query_len = u16::from_be_bytes(len_buf) as usize;
+
+            // Read the DNS query body
+            let mut query = vec![0u8; query_len];
+            stream.read_exact(&mut query).await.unwrap();
+
+            // Build a minimal valid DNS response (12-byte header only).
+            // Copy the ID from the query; set QR=1, RD=1, RA=1, RCODE=0;
+            // QDCOUNT = 1; ANCOUNT, NSCOUNT, ARCOUNT = 0.
+            let mut response = vec![0u8; 12];
+            response[0..2].copy_from_slice(&query[0..2]); // ID
+            response[2] = 0x81; // flags: QR + RD
+            response[3] = 0x80; // flags: RA
+            response[5] = 0x01; // QDCOUNT low byte = 1
+
+            // Send 2-byte length prefix + response
+            let resp_len = (response.len() as u16).to_be_bytes();
+            stream.write_all(&resp_len).await.unwrap();
+            stream.write_all(&response).await.unwrap();
+        });
+
+        // Build a real DNS query so the server can echo back the ID
+        let query = build_dns_query("example.com", TYPE_A).unwrap();
+
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            send_query_tcp(&query, &addr.to_string()),
+        )
+        .await;
+
+        match result {
+            Ok(Ok(response)) => {
+                assert!(response.len() >= 12, "Response too short");
+                let flags = u16::from_be_bytes([response[2], response[3]]);
+                assert!(
+                    flags & 0x8000 != 0,
+                    "QR flag should be set in response"
+                );
+                assert_eq!(flags & 0x000f, 0, "RCODE should be 0");
+            }
+            Ok(Err(e)) => panic!("send_query_tcp failed: {}", e),
+            Err(_) => panic!("send_query_tcp timed out"),
+        }
     }
 
     // -----------------------------------------------------------------------

@@ -14,6 +14,7 @@ use crate::types::port_scan::{OpenPort, PortRange, ScanOptions};
 /// Returns an error if:
 /// - `options.concurrency` is 0 (would deadlock the semaphore)
 /// - DNS resolution of `target` fails and `target` is not an IP address
+#[cfg(test)]
 pub async fn scan_ports(
     target: &str,
     port_range: &PortRange,
@@ -61,7 +62,7 @@ pub async fn scan_ports(
 
             let is_open = tcp_connect::check_port(&target_str, port, timeout_ms).await;
             if is_open {
-                let service = guess_service(port);
+                let service = crate::core::utils::guess_service_by_port(port).map(|s| s.to_string());
                 Some(OpenPort {
                     port,
                     service,
@@ -87,84 +88,11 @@ pub async fn scan_ports(
     Ok(open_ports)
 }
 
-/// Guess the service name for a well-known port.
-pub fn guess_service(port: u16) -> Option<String> {
-    let name = match port {
-        20 | 21 => "FTP",
-        22 => "SSH",
-        23 => "Telnet",
-        25 => "SMTP",
-        53 => "DNS",
-        80 => "HTTP",
-        110 => "POP3",
-        143 => "IMAP",
-        443 => "HTTPS",
-        465 => "SMTPS",
-        587 => "SMTP Submission",
-        993 => "IMAPS",
-        995 => "POP3S",
-        1433 => "MSSQL",
-        1521 => "Oracle DB",
-        3306 => "MySQL",
-        3389 => "RDP",
-        5432 => "PostgreSQL",
-        5900 => "VNC",
-        6379 => "Redis",
-        8080 => "HTTP-Alt",
-        8443 => "HTTPS-Alt",
-        27017 => "MongoDB",
-        _ => return None,
-    };
-    Some(name.to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::utils;
     use crate::types::port_scan::ScanOptions;
-
-    #[test]
-    fn test_guess_service_known_ports() {
-        let cases = [
-            (20, "FTP"),
-            (21, "FTP"),
-            (22, "SSH"),
-            (23, "Telnet"),
-            (25, "SMTP"),
-            (53, "DNS"),
-            (80, "HTTP"),
-            (110, "POP3"),
-            (143, "IMAP"),
-            (443, "HTTPS"),
-            (465, "SMTPS"),
-            (587, "SMTP Submission"),
-            (993, "IMAPS"),
-            (995, "POP3S"),
-            (1433, "MSSQL"),
-            (1521, "Oracle DB"),
-            (3306, "MySQL"),
-            (3389, "RDP"),
-            (5432, "PostgreSQL"),
-            (5900, "VNC"),
-            (6379, "Redis"),
-            (8080, "HTTP-Alt"),
-            (8443, "HTTPS-Alt"),
-            (27017, "MongoDB"),
-        ];
-        for (port, expected) in &cases {
-            assert_eq!(guess_service(*port), Some(expected.to_string()));
-        }
-    }
-
-    #[test]
-    fn test_guess_service_unknown_ports() {
-        // Boundary: port 0 (valid u16)
-        assert_eq!(guess_service(0), None);
-        // Entirely unassigned
-        assert_eq!(guess_service(9999), None);
-        // Upper bound
-        assert_eq!(guess_service(65535), None);
-    }
 
     #[test]
     fn test_scan_ports_rejects_zero_concurrency() {

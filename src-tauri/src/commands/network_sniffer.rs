@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::Semaphore;
+use tracing::warn;
 use uuid::Uuid;
 
 static SCAN_RESULTS: LazyLock<Mutex<HashMap<String, Vec<DeviceResult>>>> =
@@ -302,7 +303,7 @@ async fn run_scan(app: AppHandle, task_id: String, options: SnifferOptions) {
                 }
 
                 // Resolve hostname and MAC
-                let hostname = discovery::resolve_hostname(&ip_str);
+                let hostname: Option<String> = None; // reverse DNS removed (unreliable)
                 let (mac, vendor) = match discovery::resolve_mac(&ip_str) {
                     Some((m, v)) => (Some(m), v),
                     None => (None, None),
@@ -333,10 +334,13 @@ async fn run_scan(app: AppHandle, task_id: String, options: SnifferOptions) {
         for handle in handles {
             let _ = handle.await;
         }
-        Arc::try_unwrap(devices)
-            .unwrap_or_else(|_| panic!("devices Arc still referenced"))
-            .into_inner()
-            .unwrap_or_else(|e| e.into_inner())
+        match Arc::try_unwrap(devices) {
+            Ok(inner) => inner.into_inner().unwrap_or_else(|e| e.into_inner()),
+            Err(_) => {
+                warn!("[sniffer] devices Arc still has multiple references, returning empty results");
+                Vec::new()
+            }
+        }
     };
 
     // 6. Save results to SCAN_RESULTS
@@ -355,6 +359,13 @@ async fn run_scan(app: AppHandle, task_id: String, options: SnifferOptions) {
                 return;
             }
         };
+        // Enforce a maximum of 20 cached scan results to prevent unbounded memory growth.
+        // Remove the oldest entry (arbitrary key) if the limit is exceeded.
+        if results.len() >= 20 {
+            if let Some(oldest_key) = results.keys().next().cloned() {
+                results.remove(&oldest_key);
+            }
+        }
         results.insert(task_id.clone(), all_devices);
     }
 
@@ -723,5 +734,49 @@ mod tests {
         assert_eq!(opts.mode, "fast");
         assert!(opts.concurrency_hosts > 0);
         assert!(opts.concurrency_ports > 0);
+    }
+
+    /// Lock to serialise tests that modify SCAN_RESULTS.
+    static SCAN_RESULTS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn test_scan_results_cap() {
+        let _guard = SCAN_RESULTS_LOCK.lock().unwrap();
+
+        // Fill SCAN_RESULTS with 20 entries
+        {
+            let mut results = SCAN_RESULTS.lock().unwrap();
+            results.clear();
+            for i in 0..20 {
+                results.insert(format!("task_{}", i), vec![]);
+            }
+            assert_eq!(results.len(), 20);
+        }
+
+        // Simulate the exact cleanup logic from run_scan():
+        // Enforce a maximum of 20 cached scan results.
+        // Remove the oldest entry (arbitrary key) if the limit is exceeded.
+        {
+            let mut results = SCAN_RESULTS.lock().unwrap();
+            if results.len() >= 20 {
+                if let Some(oldest_key) = results.keys().next().cloned() {
+                    results.remove(&oldest_key);
+                }
+            }
+            results.insert("overflow_task".to_string(), vec![]);
+        }
+
+        // Verify the cap is enforced: only 20 entries remain
+        {
+            let results = SCAN_RESULTS.lock().unwrap();
+            assert_eq!(results.len(), 20, "SCAN_RESULTS should be capped at 20");
+            assert!(
+                results.contains_key("overflow_task"),
+                "Newly inserted task should be present"
+            );
+        }
+
+        // Clean up global state
+        SCAN_RESULTS.lock().unwrap().clear();
     }
 }

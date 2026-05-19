@@ -16,15 +16,12 @@ import {
   fileAccept,
   fileReject,
   getFileDownloadUrl,
-  onFileRequest,
-  onFileProgress,
-  onFileComplete,
-  onFileError,
   discoveryPeers,
   type FileTransfer,
   type PeerInfo,
 } from "@/lib/tauri";
-import type { UnlistenFn } from "@tauri-apps/api/event";
+import { formatSize, progressPercent, formatTime } from "@/lib/format";
+import { useFileTransferListeners } from "@/composables/useFileTransfer";
 
 const transfers = ref<FileTransfer[]>([]);
 const peers = ref<PeerInfo[]>([]);
@@ -35,36 +32,7 @@ const loading = ref(true);
 const incomingRequest = ref<{ fileId: string; filename: string; size: number; from: string } | null>(null);
 const downloadingId = ref<string | null>(null);
 
-let unlistenRequest: UnlistenFn | null = null;
-let unlistenProgress: UnlistenFn | null = null;
-let unlistenComplete: UnlistenFn | null = null;
-let unlistenError: UnlistenFn | null = null;
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}
-
-function progressPercent(t: FileTransfer): number {
-  if (t.size === 0) return 0;
-  return Math.round((t.received / t.size) * 100);
-}
-
-function formatTime(iso: string): string {
-  try {
-    const d = new Date(iso);
-    return d.toLocaleString("zh-CN", {
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return iso;
-  }
-}
+const { setup: setupFileListeners, teardown: teardownFileListeners } = useFileTransferListeners(transfers, incomingRequest);
 
 function peerLabel(peerId: string): string {
   const peer = peers.value.find((p) => p.id === peerId);
@@ -113,51 +81,11 @@ onMounted(async () => {
     console.error("Failed to load peers:", e);
   }
 
-  unlistenRequest = await onFileRequest((req) => {
-    incomingRequest.value = req;
-    transfers.value.unshift({
-      id: req.fileId,
-      filename: req.filename,
-      path: null,
-      size: req.size,
-      received: 0,
-      status: "pending",
-      peer_id: req.from,
-      is_incoming: true,
-      created_at: new Date().toISOString(),
-    });
-  });
-
-  unlistenProgress = await onFileProgress((p) => {
-    const t = transfers.value.find((x) => x.id === p.fileId);
-    if (t) {
-      t.received = p.received;
-      t.size = p.total;
-      if (t.status !== "pending") t.status = "transferring";
-    }
-  });
-
-  unlistenComplete = await onFileComplete((p) => {
-    const t = transfers.value.find((x) => x.id === p.fileId);
-    if (t) {
-      t.status = "completed";
-      t.received = t.size;
-      t.path = p.path;
-      t.download_url = p.downloadUrl;
-    }
-  });
-
-  unlistenError = await onFileError((p) => {
-    const t = transfers.value.find((x) => x.id === p.fileId);
-    if (t) t.status = "failed";
-  });
+  await setupFileListeners();
 });
 
 onUnmounted(() => {
-  unlistenRequest?.();
-  unlistenProgress?.();
-  unlistenComplete?.();
-  unlistenError?.();
+  teardownFileListeners();
 });
 
 async function handleAccept(fileId: string) {
@@ -226,11 +154,11 @@ async function handleDownload(fileId: string) {
           </div>
         </div>
         <div class="flex gap-2 shrink-0">
-          <Button variant="danger" size="sm" @click="handleReject(incomingRequest.fileId)">
+          <Button variant="danger" size="sm" @click="handleReject(incomingRequest.fileId)" aria-label="拒绝文件">
             <X class="mr-1 h-3.5 w-3.5" />
             拒绝
           </Button>
-          <Button size="sm" @click="handleAccept(incomingRequest.fileId)">
+          <Button size="sm" @click="handleAccept(incomingRequest.fileId)" aria-label="接受文件">
             <Check class="mr-1 h-3.5 w-3.5" />
             接受
           </Button>
@@ -319,12 +247,12 @@ async function handleDownload(fileId: string) {
               <div v-if="t.status === 'transferring' && t.size > 0" class="mt-3 max-w-sm">
                 <div class="flex items-center gap-2 text-xs text-ink-faint mb-1">
                   <span>{{ formatSize(t.received) }} / {{ formatSize(t.size) }}</span>
-                  <span>({{ progressPercent(t) }}%)</span>
+                  <span>({{ progressPercent(t.received, t.size) }}%)</span>
                 </div>
                 <div class="h-2 rounded-full bg-paper-deep/20 overflow-hidden">
                   <div
                     class="h-full rounded-full bg-bamboo transition-all duration-300"
-                    :style="{ width: progressPercent(t) + '%' }"
+                    :style="{ width: progressPercent(t.received, t.size) + '%' }"
                   />
                 </div>
               </div>
@@ -342,6 +270,7 @@ async function handleDownload(fileId: string) {
                 <button
                   class="rounded-lg p-1.5 text-red-500 transition-colors hover:bg-red-500/10"
                   title="拒绝"
+                  aria-label="拒绝文件"
                   @click="handleReject(t.id)"
                 >
                   <X class="h-4 w-4" />
@@ -349,6 +278,7 @@ async function handleDownload(fileId: string) {
                 <button
                   class="rounded-lg p-1.5 text-bamboo transition-colors hover:bg-bamboo/10"
                   title="接受"
+                  aria-label="接受文件"
                   @click="handleAccept(t.id)"
                 >
                   <Check class="h-4 w-4" />

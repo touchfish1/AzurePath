@@ -2,22 +2,11 @@ pub mod icmp;
 
 use tokio::process::Command;
 
-#[cfg(target_os = "windows")]
-use encoding_rs::GBK;
-
 /// Decode ping output bytes to a UTF-8 string.
 /// On non-Windows platforms, bytes are expected to be UTF-8.
 /// On Windows, the system locale encoding (e.g. GBK for Chinese) is used as fallback.
 pub(crate) fn decode_ping_output(bytes: &[u8]) -> String {
-    #[cfg(target_os = "windows")]
-    {
-        String::from_utf8(bytes.to_vec())
-            .unwrap_or_else(|_| GBK.decode(bytes).0.to_string())
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        String::from_utf8_lossy(bytes).to_string()
-    }
+    crate::core::utils::decode_output(bytes)
 }
 
 #[derive(Debug, Clone)]

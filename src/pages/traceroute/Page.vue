@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted } from "vue";
-import { Play, Square } from "lucide-vue-next";
+import { Play, Square, Route } from "lucide-vue-next";
 import Button from "@/components/ui/button/Button.vue";
 import { useTracerouteStore } from "@/stores/traceroute";
 
@@ -138,6 +138,22 @@ onUnmounted(() => {
             </tr>
           </tbody>
         </table>
+      </div>
+    </div>
+
+    <!-- Empty state guide -->
+    <div
+      v-else-if="!store.running && !store.error"
+      class="flex items-center justify-center rounded-xl border border-dashed border-paper-deep/30 bg-paper-warm/20 py-16 text-sm text-ink-faint"
+    >
+      <div class="text-center max-w-sm">
+        <Route class="mx-auto h-10 w-10 mb-3 opacity-30" />
+        <p class="font-medium text-ink-soft">输入目标 IP 或域名开始路由追踪</p>
+        <p class="mt-2 text-xs opacity-60 leading-relaxed">
+          追踪数据包到达目标所经过的每一个路由节点
+          <br />
+          最大跳数默认为 30，可调整超时时间
+        </p>
       </div>
     </div>
 

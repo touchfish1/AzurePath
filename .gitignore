@@ -1,3 +1,25 @@
 node_modules/
 dist/
 src-tauri/target/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/settings.json
+.idea/
+
+# Env
+.env
+.env.*
+.env.local
+
+# Logs
+*.log
+
+# Tauri generated schemas
+src-tauri/gen/
+
+# Rust
+*.pdb

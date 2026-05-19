@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 mod commands;
 mod core;
 mod types;
@@ -9,6 +7,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             // Phase 1
             commands::ping::ping_start,

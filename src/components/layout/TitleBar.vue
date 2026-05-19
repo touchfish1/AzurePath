@@ -52,6 +52,7 @@ function handleThemeToggle() {
         class="flex h-full items-center justify-center px-3 text-ink-faint hover:text-ink hover:bg-paper-warm transition-colors"
         @click="handleThemeToggle"
         :title="store.resolved === 'dark' ? '切换到亮色模式' : '切换到暗色模式'"
+        aria-label="切换主题"
       >
         <Sun v-if="store.resolved === 'dark'" class="h-3.5 w-3.5" />
         <Moon v-else class="h-3.5 w-3.5" />
@@ -62,6 +63,7 @@ function handleThemeToggle() {
         class="flex h-full items-center justify-center px-3 text-ink-faint hover:text-ink hover:bg-paper-warm transition-colors"
         @click="minimize"
         title="最小化"
+        aria-label="最小化窗口"
       >
         <Minus class="h-3.5 w-3.5" />
       </button>
@@ -71,6 +73,7 @@ function handleThemeToggle() {
         class="flex h-full items-center justify-center px-3 text-ink-faint hover:text-ink hover:bg-paper-warm transition-colors"
         @click="toggleMaximize"
         :title="isMaximized ? '还原' : '最大化'"
+        :aria-label="isMaximized ? '还原窗口' : '最大化窗口'"
       >
         <Square class="h-3 w-3" />
       </button>
@@ -80,6 +83,7 @@ function handleThemeToggle() {
         class="flex h-full items-center justify-center px-3 text-ink-faint hover:text-cloud hover:bg-red-500 transition-colors"
         @click="closeWindow"
         title="关闭"
+        aria-label="关闭窗口"
       >
         <X class="h-3.5 w-3.5" />
       </button>

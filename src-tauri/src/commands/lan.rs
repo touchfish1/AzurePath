@@ -1,6 +1,7 @@
 use crate::core::connection::ConnectionManager;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
+use tracing::{info, warn};
 
 /// Initialize all LAN services: discovery, connection, chat, file transfer.
 #[tauri::command]
@@ -30,7 +31,7 @@ pub async fn lan_init(app: AppHandle) -> Result<(), String> {
     // 6. Start clipboard monitor
     let _ = crate::commands::clipboard::clipboard_start(app.clone()).await;
 
-    println!("[lan] All services initialized successfully");
+    info!("[lan] All services initialized successfully");
     let _ = app.emit("lan:ready", serde_json::json!({ "status": "ok" }));
 
     // 5. When new peers are discovered via discovery, connect to them via TCP
@@ -52,13 +53,13 @@ pub async fn lan_init(app: AppHandle) -> Result<(), String> {
                     if peer.id == crate::core::discovery::my_id().await {
                         continue;
                     }
-                    println!("[lan] Auto-connecting to peer {} at {}", peer.id, peer.ip);
+                    info!("[lan] Auto-connecting to peer {} at {}", peer.id, peer.ip);
                     let mgr = conn_mgr_clone.clone();
                     let pid = peer.id.clone();
                     let pip = peer.ip.clone();
                     tokio::spawn(async move {
                         if let Err(e) = mgr.connect_to_peer(&pid, &pip).await {
-                            eprintln!("[lan] Failed to connect to {}: {}", pid, e);
+                            warn!("[lan] Failed to connect to {}: {}", pid, e);
                         }
                     });
                 }

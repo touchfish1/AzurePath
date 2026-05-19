@@ -4,6 +4,7 @@ use crate::types::chat::StoredMessage;
 use std::sync::OnceLock;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
+use tracing::warn;
 
 static CHAT: OnceLock<ChatService> = OnceLock::new();
 pub(crate) static CONN_MGR: OnceLock<Arc<ConnectionManager>> = OnceLock::new();
@@ -68,7 +69,7 @@ pub async fn chat_init(app: AppHandle) -> Result<(), String> {
                     crate::commands::clipboard::handle_frame(&incoming, &app_clone).await;
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                    eprintln!("[chat] Lagged by {} messages", n);
+                    warn!("[chat] Lagged by {} messages", n);
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             }
@@ -179,10 +180,10 @@ mod tests {
         // (no Tauri app is running). We verify this to catch
         // accidental test-order dependencies.
         if CHAT.get().is_some() {
-            eprintln!("WARNING: CHAT static is already initialized — test isolation may be compromised");
+            warn!("WARNING: CHAT static is already initialized — test isolation may be compromised");
         }
         if CONN_MGR.get().is_some() {
-            eprintln!("WARNING: CONN_MGR static is already initialized — test isolation may be compromised");
+            warn!("WARNING: CONN_MGR static is already initialized — test isolation may be compromised");
         }
         // No assertion — just a diagnostic.
     }

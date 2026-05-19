@@ -1,12 +1,16 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
+use tracing::{info, warn};
 
 /// Maximum allowed length for a filename or file_id string read from wire.
 const MAX_WIRE_STRING_LEN: usize = 4096;
+/// Maximum allowed file size in bytes (10 GB).
+const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024 * 1024;
 
 pub struct FileReceiver {
     running: Arc<AtomicBool>,
@@ -39,7 +43,7 @@ impl FileReceiver {
             .map_err(|e| format!("Failed to get local addr: {}", e))?
             .port();
 
-        println!("[file] Receiver listening on port {}", port);
+        info!("[file] Receiver listening on port {}", port);
 
         let this = self.clone();
         tokio::spawn(async move {
@@ -49,13 +53,13 @@ impl FileReceiver {
                 }
                 match listener.accept().await {
                     Ok((stream, addr)) => {
-                        println!("[file] Incoming file transfer from {}", addr);
+                        info!("[file] Incoming file transfer from {}", addr);
                         let this_clone = this.clone();
                         tokio::spawn(async move {
                             this_clone.receive_file(stream).await;
                         });
                     }
-                    Err(e) => eprintln!("[file] Accept error: {}", e),
+                    Err(e) => warn!("[file] Accept error: {}", e),
                 }
             }
         });
@@ -68,7 +72,7 @@ impl FileReceiver {
         let file_id = match read_string(&mut stream).await {
             Ok(id) => id,
             Err(e) => {
-                eprintln!("[file] Failed to read file_id: {}", e);
+                warn!("[file] Failed to read file_id: {}", e);
                 return;
             }
         };
@@ -77,16 +81,25 @@ impl FileReceiver {
         let total_size = match read_u64(&mut stream).await {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("[file] Failed to read file size: {}", e);
+                warn!("[file] Failed to read file size: {}", e);
                 return;
             }
         };
+
+        // Reject files larger than the maximum allowed size
+        if total_size > MAX_FILE_SIZE {
+            warn!(
+                "[file] Rejected file of size {} bytes (max allowed: {} bytes)",
+                total_size, MAX_FILE_SIZE
+            );
+            return;
+        }
 
         // Read filename
         let filename_raw = match read_string(&mut stream).await {
             Ok(name) => name,
             Err(e) => {
-                eprintln!("[file] Failed to read filename: {}", e);
+                warn!("[file] Failed to read filename: {}", e);
                 return;
             }
         };
@@ -95,7 +108,7 @@ impl FileReceiver {
         // A malicious peer could send a filename like "../../etc/passwd".
         let filename = sanitize_filename(&filename_raw);
         let dest_path = self.download_dir.join(&filename);
-        println!(
+        info!(
             "[file] Receiving {} ({} bytes) -> {:?}",
             filename, total_size, dest_path
         );
@@ -111,28 +124,37 @@ impl FileReceiver {
                 while received < total_size {
                     let remaining = (total_size - received) as usize;
                     let to_read = buf.len().min(remaining);
-                    match stream.read_exact(&mut buf[..to_read]).await {
-                        Ok(_) => {
+                    match tokio::time::timeout(
+                        Duration::from_secs(30),
+                        stream.read_exact(&mut buf[..to_read]),
+                    )
+                    .await
+                    {
+                        Ok(Ok(_)) => {
                             if let Err(e) = file.write_all(&buf[..to_read]).await {
-                                eprintln!("[file] Write error: {}", e);
+                                warn!("[file] Write error: {}", e);
                                 break;
                             }
                             received += to_read as u64;
                             let mut active = self.active.lock().await;
                             active.insert(file_id.clone(), (received, total_size));
                         }
-                        Err(e) => {
-                            eprintln!("[file] Read error during transfer: {}", e);
+                        Ok(Err(e)) => {
+                            warn!("[file] Read error during transfer: {}", e);
+                            break;
+                        }
+                        Err(_) => {
+                            warn!("[file] Read timeout during transfer");
                             break;
                         }
                     }
                 }
 
                 if received == total_size {
-                    println!("[file] Transfer complete: {}", filename);
+                    info!("[file] Transfer complete: {}", filename);
                 }
             }
-            Err(e) => eprintln!("[file] Failed to create file {:?}: {}", dest_path, e),
+            Err(e) => warn!("[file] Failed to create file {:?}: {}", dest_path, e),
         }
 
         self.active.lock().await.remove(&file_id);
@@ -187,18 +209,11 @@ pub fn sanitize_filename(name: &str) -> String {
     }
 }
 
-fn home_dir() -> Option<PathBuf> {
-    std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .ok()
-        .map(PathBuf::from)
-}
-
 /// Returns the default download directory used by the file receiver.
 /// This is the single source of truth for the download path, shared
 /// across both the receiver and the FileComplete event handler.
 pub fn default_download_dir() -> PathBuf {
-    let home = home_dir().unwrap_or_else(|| PathBuf::from("."));
+    let home = crate::core::utils::home_dir().unwrap_or_else(|| PathBuf::from("."));
     home.join("AzurePath").join("downloads")
 }
 
@@ -260,6 +275,65 @@ mod tests {
         // the constant is used correctly by checking the limit
         assert_eq!(MAX_WIRE_STRING_LEN, 4096);
     }
+
+    #[test]
+    fn test_max_file_size_constant_value() {
+        // Verify MAX_FILE_SIZE = 10 GB
+        assert_eq!(MAX_FILE_SIZE, 10 * 1024 * 1024 * 1024);
+    }
+
+    #[test]
+    fn test_default_download_dir_contains_azurepath() {
+        let dir = default_download_dir();
+        let path_str = dir.to_string_lossy();
+        assert!(
+            path_str.contains("AzurePath"),
+            "Expected path to contain 'AzurePath', got: {}",
+            path_str
+        );
+        assert!(
+            path_str.contains("downloads"),
+            "Expected path to contain 'downloads', got: {}",
+            path_str
+        );
+    }
+
+    #[test]
+    fn test_sanitize_filename_removes_absolute_windows_path() {
+        // C:\Windows\system32\malware.exe  →  C:_Windows_system32_malware.exe
+        let result = sanitize_filename("C:\\Windows\\system32\\malware.exe");
+        assert!(!result.contains('\\'), "backslashes should be replaced");
+        assert!(result.contains("_Windows_"), "path components should be joined by underscore");
+        assert!(result.contains("malware.exe"), "filename part should be preserved");
+    }
+
+    #[test]
+    fn test_sanitize_filename_mixed_separators() {
+        // foo/bar\\baz  →  foo_bar_baz
+        assert_eq!(sanitize_filename("foo/bar\\baz"), "foo_bar_baz");
+    }
+
+    #[test]
+    fn test_sanitize_filename_drive_letter_preserved() {
+        // The "C:" should be kept (colon is not stripped)
+        let result = sanitize_filename("C:file.txt");
+        assert_eq!(result, "C:file.txt");
+    }
+
+    #[test]
+    fn test_sanitize_filename_trailing_dots_and_spaces_on_windows() {
+        // Trailing dots/spaces are reserved on Windows — currently they are
+        // preserved in the sanitize function (no explicit stripping of
+        // trailing dots).  At minimum, the function should not panic.
+        let result = sanitize_filename("file...");
+        assert_eq!(result, "file_..");
+    }
+
+    #[test]
+    fn test_sanitize_filename_nested_dots() {
+        // Consecutive ".." sequences become "_" after the ..→_ replacement
+        assert_eq!(sanitize_filename("a..b"), "a__b");
+    }
 }
 
 async fn read_string(stream: &mut TcpStream) -> Result<String, String> {
@@ -271,18 +345,18 @@ async fn read_string(stream: &mut TcpStream) -> Result<String, String> {
         ));
     }
     let mut buf = vec![0u8; len];
-    stream
-        .read_exact(&mut buf)
+    tokio::time::timeout(Duration::from_secs(30), stream.read_exact(&mut buf))
         .await
+        .map_err(|_| "Read timeout".to_string())?
         .map_err(|e| format!("Failed to read string: {}", e))?;
     String::from_utf8(buf).map_err(|e| format!("Invalid UTF-8: {}", e))
 }
 
 async fn read_u64(stream: &mut TcpStream) -> Result<u64, String> {
     let mut buf = [0u8; 8];
-    stream
-        .read_exact(&mut buf)
+    tokio::time::timeout(Duration::from_secs(30), stream.read_exact(&mut buf))
         .await
+        .map_err(|_| "Read timeout".to_string())?
         .map_err(|e| format!("Failed to read u64: {}", e))?;
     Ok(u64::from_be_bytes(buf))
 }

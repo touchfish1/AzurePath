@@ -4,6 +4,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use tracing::{info, warn};
 
 /// Wrapper that recovers from a poisoned mutex by locking a new Mutex, effectively
 /// restarting the shared state. Used to prevent a single panicking handler from
@@ -12,7 +13,7 @@ fn lock_map(map: &Mutex<HashMap<String, String>>) -> std::sync::MutexGuard<'_, H
     match map.lock() {
         Ok(guard) => guard,
         Err(poisoned) => {
-            eprintln!("[file_server] Mutex was poisoned, recovering");
+            warn!("[file_server] Mutex was poisoned, recovering");
             poisoned.into_inner()
         }
     }
@@ -43,14 +44,14 @@ impl FileServer {
         let files: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
         let files_clone = files.clone();
 
-        println!("[file_server] Starting on 127.0.0.1:{}", port);
+        info!("[file_server] Starting on 127.0.0.1:{}", port);
 
         let thread = std::thread::spawn(move || {
             for stream in listener.incoming() {
                 match stream {
                     Ok(stream) => handle_request(stream, &files_clone),
                     Err(e) => {
-                        eprintln!("[file_server] Accept error: {}", e);
+                        warn!("[file_server] Accept error: {}", e);
                         break;
                     }
                 }

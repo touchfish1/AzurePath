@@ -85,38 +85,7 @@ pub fn match_banner(port: u16, banner: &str, default_service: Option<&str>) -> O
 
 /// Guess service name based on port number alone.
 pub fn guess_service_by_port(port: u16) -> Option<&'static str> {
-    match port {
-        21 => Some("FTP"),
-        22 => Some("SSH"),
-        23 => Some("Telnet"),
-        25 => Some("SMTP"),
-        53 => Some("DNS"),
-        80 => Some("HTTP"),
-        110 => Some("POP3"),
-        111 => Some("RPC"),
-        135 => Some("RPC"),
-        139 => Some("NetBIOS"),
-        143 => Some("IMAP"),
-        443 => Some("HTTPS"),
-        445 => Some("SMB"),
-        465 => Some("SMTPS"),
-        587 => Some("SMTP"),
-        993 => Some("IMAPS"),
-        995 => Some("POP3S"),
-        1433 => Some("MSSQL"),
-        1521 => Some("Oracle"),
-        2049 => Some("NFS"),
-        3306 => Some("MySQL"),
-        3389 => Some("RDP"),
-        5432 => Some("PostgreSQL"),
-        5900 => Some("VNC"),
-        6379 => Some("Redis"),
-        8080 => Some("HTTP-Alt"),
-        8443 => Some("HTTPS-Alt"),
-        9090 => Some("HTTP-Alt"),
-        27017 => Some("MongoDB"),
-        _ => None,
-    }
+    crate::core::utils::guess_service_by_port(port)
 }
 
 /// Run service detection: grab banner, match fingerprint, fill PortResult.

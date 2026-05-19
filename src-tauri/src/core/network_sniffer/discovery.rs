@@ -54,8 +54,6 @@ pub async fn discover_hosts(
     alive_hosts
 }
 
-use std::net::ToSocketAddrs;
-
 /// Get MAC address by parsing `arp -a` output.
 /// Returns (mac, vendor) if the IP is found in ARP cache.
 pub fn resolve_mac(ip: &str) -> Option<(String, Option<String>)> {
@@ -109,19 +107,6 @@ fn mac_vendor(mac: &str) -> Option<String> {
         _ => return None,
     };
     Some(vendor.to_string())
-}
-
-pub fn resolve_hostname(ip: &str) -> Option<String> {
-    // Use system reverse DNS lookup via socket addresses
-    if let Ok(addr) = format!("{}:0", ip).to_socket_addrs() {
-        for a in addr {
-            if let std::net::SocketAddr::V4(_) = a {
-                // a.ip() returns the resolved IP, not hostname
-            }
-        }
-    }
-    // Fall back to empty — reverse DNS via std is unreliable on Windows
-    None
 }
 
 #[cfg(test)]

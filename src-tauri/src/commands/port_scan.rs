@@ -140,7 +140,7 @@ async fn run_port_scan(
         if let Some(port) = result {
             let open_port = OpenPort {
                 port,
-                service: port_scan::guess_service(port),
+                service: crate::core::utils::guess_service_by_port(port).map(|s| s.to_string()),
             };
             open_ports.push(open_port.clone());
 

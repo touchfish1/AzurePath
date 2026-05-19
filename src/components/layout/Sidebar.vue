@@ -62,6 +62,7 @@ function isActive(path: string): boolean {
             ? 'bg-bamboo/10 text-bamboo'
             : 'text-ink-soft hover:bg-paper-deep/50 hover:text-ink'
         "
+        :aria-current="isActive(item.path) ? 'page' : undefined"
       >
         <component
           :is="item.icon"

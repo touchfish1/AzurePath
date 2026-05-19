@@ -376,19 +376,19 @@ export function onChatMessage(cb: (msg: StoredMessage) => void): Promise<Unliste
 }
 
 export function onFileRequest(cb: (payload: { fileId: string; filename: string; size: number; from: string }) => void): Promise<UnlistenFn> {
-  return listen("file:request", (event) => cb(event.payload as any));
+  return listen<{ fileId: string; filename: string; size: number; from: string }>("file:request", (event) => cb(event.payload));
 }
 
 export function onFileProgress(cb: (payload: { fileId: string; received: number; total: number; speed: number }) => void): Promise<UnlistenFn> {
-  return listen("file:progress", (event) => cb(event.payload as any));
+  return listen<{ fileId: string; received: number; total: number; speed: number }>("file:progress", (event) => cb(event.payload));
 }
 
 export function onFileComplete(cb: (payload: { fileId: string; path: string; downloadUrl?: string }) => void): Promise<UnlistenFn> {
-  return listen("file:complete", (event) => cb(event.payload as any));
+  return listen<{ fileId: string; path: string; downloadUrl?: string }>("file:complete", (event) => cb(event.payload));
 }
 
 export function onFileError(cb: (payload: { fileId: string; error: string }) => void): Promise<UnlistenFn> {
-  return listen("file:error", (event) => cb(event.payload as any));
+  return listen<{ fileId: string; error: string }>("file:error", (event) => cb(event.payload));
 }
 
 // ============================================================

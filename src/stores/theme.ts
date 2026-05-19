@@ -38,8 +38,8 @@ export const useThemeStore = defineStore("theme", () => {
   }
 
   function toggleTheme() {
-    const next = resolved.value === "dark" ? "light" : "dark";
-    theme.value = next;
+    const base = theme.value === "system" ? resolved.value : theme.value;
+    theme.value = base === "dark" ? "light" : "dark";
   }
 
   // Watch for system preference changes
@@ -64,15 +64,35 @@ export const useThemeStore = defineStore("theme", () => {
     mediaHandler = null;
   }
 
+  function persistTheme() {
+    try {
+      localStorage.setItem("azurepath-theme", theme.value);
+    } catch {
+      // localStorage unavailable (SSR, privacy mode, etc.)
+    }
+  }
+
   // Initialize
   function init() {
+    // Restore persisted theme preference
+    try {
+      const saved = localStorage.getItem("azurepath-theme");
+      if (saved === "light" || saved === "dark" || saved === "system") {
+        theme.value = saved;
+      }
+    } catch {
+      // localStorage unavailable
+    }
+
     applyTheme(theme.value);
     setupMediaListener();
-
-    watch(theme, (val) => {
-      applyTheme(val);
-    });
   }
+
+  // Watch for theme changes (always active, not just after init)
+  watch(theme, (val) => {
+    applyTheme(val);
+    persistTheme();
+  });
 
   return {
     theme,

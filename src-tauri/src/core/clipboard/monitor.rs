@@ -8,6 +8,7 @@ use tauri::{AppHandle, Emitter};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tokio::sync::Mutex;
 use uuid::Uuid;
+use tracing::warn;
 
 pub const DEFAULT_INTERVAL_MS: u64 = 1000;
 
@@ -144,7 +145,7 @@ impl ClipboardMonitor {
                             entry.image_path = Some(img_path.to_string_lossy().to_string());
                         }
                         Err(e) => {
-                            eprintln!("[clipboard] Failed to save image, skipping entry: {}", e);
+                            warn!("[clipboard] Failed to save image, skipping entry: {}", e);
                             continue;
                         }
                     }
@@ -152,7 +153,7 @@ impl ClipboardMonitor {
 
                 // Phase 4: persist to DB
                 if let Err(e) = store.insert(&entry) {
-                    eprintln!("[clipboard] Insert error: {}", e);
+                    warn!("[clipboard] Insert error: {}", e);
                     continue;
                 }
 

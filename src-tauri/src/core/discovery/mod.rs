@@ -5,6 +5,7 @@ use peer_table::PeerTable;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::net::UdpSocket;
+use tracing::{info, warn};
 
 pub const DISCOVERY_PORT: u16 = 42069;
 pub const HEARTBEAT_INTERVAL_SECS: u64 = 5;
@@ -76,7 +77,7 @@ impl DiscoveryService {
         let my_id = init_identity().await;
         let my_hostname = my_hostname().await;
 
-        println!("[discovery] Starting with identity: {}", my_id);
+        info!("[discovery] Starting with identity: {}", my_id);
 
         // Set identity for the connection module
         crate::core::connection::set_my_id(my_id.clone()).await;
@@ -91,7 +92,7 @@ impl DiscoveryService {
             .set_broadcast(true)
             .map_err(|e| format!("Failed to set broadcast: {}", e))?;
 
-        println!("[discovery] UDP listener on {}", bind_addr);
+        info!("[discovery] UDP listener on {}", bind_addr);
 
         // Enable broadcast socket for sending
         let broadcast_socket = UdpSocket::bind("0.0.0.0:0")
@@ -131,13 +132,13 @@ impl DiscoveryService {
                             let ip = peer.ip.clone();
                             let is_new = peer_table.upsert(peer).await;
                             if is_new {
-                                println!(
+                                info!(
                                     "[discovery] New peer discovered: {} ({})",
                                     hostname, ip
                                 );
                             }
                         } else {
-                            eprintln!(
+                            warn!(
                                 "[discovery] Invalid broadcast from {}: {}",
                                 src_addr,
                                 String::from_utf8_lossy(data)
@@ -146,7 +147,7 @@ impl DiscoveryService {
                     }
                     Err(e) => {
                         if listener_running.load(Ordering::SeqCst) {
-                            eprintln!("[discovery] Recv error: {}", e);
+                            warn!("[discovery] Recv error: {}", e);
                         }
                         break;
                     }
@@ -156,6 +157,9 @@ impl DiscoveryService {
 
         // 2. Spawn heartbeat broadcaster
         let heartbeat_running = this.running.clone();
+        // Invariant fields — computed once outside the loop
+        let os = std::env::consts::OS.to_string();
+        let listen_port = crate::core::connection::LISTEN_PORT;
         tokio::spawn(async move {
             loop {
                 if !heartbeat_running.load(Ordering::SeqCst) {
@@ -163,13 +167,12 @@ impl DiscoveryService {
                 }
 
                 // Build peer info for broadcast
-                let os = std::env::consts::OS.to_string();
                 let peer_info = PeerInfo {
                     id: my_id.clone(),
                     hostname: my_hostname.clone(),
                     ip: "0.0.0.0".to_string(), // receiver fills from source addr
-                    os,
-                    listen_port: crate::core::connection::LISTEN_PORT,
+                    os: os.clone(),
+                    listen_port,
                     last_seen: chrono::Utc::now().to_rfc3339(),
                     status: "online".to_string(),
                 };
@@ -177,7 +180,7 @@ impl DiscoveryService {
                 if let Ok(data) = serde_json::to_vec(&peer_info) {
                     let broadcast_addr = format!("255.255.255.255:{}", DISCOVERY_PORT);
                     if let Err(e) = broadcast_socket.send_to(&data, &broadcast_addr).await {
-                        eprintln!("[discovery] Broadcast error: {}", e);
+                        warn!("[discovery] Broadcast error: {}", e);
                     }
                 }
 
@@ -197,7 +200,7 @@ impl DiscoveryService {
 
                 let stale = stale_table.check_stale(STALE_TIMEOUT_SECS).await;
                 for id in stale {
-                    println!("[discovery] Peer {} went offline (timeout)", id);
+                    info!("[discovery] Peer {} went offline (timeout)", id);
                 }
 
                 tokio::time::sleep(tokio::time::Duration::from_secs(HEARTBEAT_INTERVAL_SECS))

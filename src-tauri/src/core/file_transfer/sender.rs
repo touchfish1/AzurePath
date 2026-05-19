@@ -1,22 +1,28 @@
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
+use tracing::info;
 
 pub struct FileSender {
     running: Arc<AtomicBool>,
     /// Active transfer progress: file_id -> (bytes_sent, total_size)
-    pub(crate) active: Arc<Mutex<std::collections::HashMap<String, (u64, u64)>>>,
+    pub(crate) active: Arc<Mutex<HashMap<String, (u64, u64)>>>,
 }
 
 impl FileSender {
     pub fn new() -> Self {
         Self {
             running: Arc::new(AtomicBool::new(true)),
-            active: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            active: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    pub fn stop(&self) {
+        self.running.store(false, Ordering::SeqCst);
     }
 
     /// Send a file to a peer's file receiver.
@@ -32,7 +38,7 @@ impl FileSender {
         file_path: &Path,
     ) -> Result<(), String> {
         let addr = format!("{}:{}", peer_addr, receiver_port);
-        println!("[file] Sending {} to {}", file_id, addr);
+        info!("[file] Sending {} to {}", file_id, addr);
 
         let mut stream = TcpStream::connect(&addr)
             .await
@@ -63,6 +69,8 @@ impl FileSender {
 
         // Track progress
         self.active.lock().await.insert(file_id.to_string(), (0, file_size));
+
+    // Stream file data
 
         // Stream file data
         let mut buf = vec![0u8; 64 * 1024];
@@ -97,7 +105,7 @@ impl FileSender {
         }
 
         self.active.lock().await.remove(file_id);
-        println!("[file] Sent {}: {} bytes", file_id, sent);
+        info!("[file] Sent {}: {} bytes", file_id, sent);
 
         Ok(())
     }
@@ -111,6 +119,46 @@ async fn write_string(stream: &mut TcpStream, s: &str) -> Result<(), String> {
         .await
         .map_err(|e| format!("Failed to write string: {}", e))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_new_sender_has_running_true() {
+        let sender = FileSender::new();
+        assert!(sender.running.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_new_sender_active_empty() {
+        let sender = FileSender::new();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let active = rt.block_on(async {
+            let map = sender.active.lock().await;
+            map.len()
+        });
+        assert_eq!(active, 0);
+    }
+
+    #[test]
+    fn test_stop_sets_running_false() {
+        let sender = FileSender::new();
+        sender.stop();
+        assert!(!sender.running.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_track_progress() {
+        let sender = Arc::new(FileSender::new());
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            sender.active.lock().await.insert("test-id".into(), (0, 100));
+            let entry = sender.active.lock().await.get("test-id").copied();
+            assert_eq!(entry, Some((0, 100)));
+        });
+    }
 }
 
 async fn write_u64(stream: &mut TcpStream, val: u64) -> Result<(), String> {

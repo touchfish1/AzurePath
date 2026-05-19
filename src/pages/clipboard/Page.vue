@@ -16,6 +16,7 @@ import {
   onClipboardNew,
   type ClipboardEntry,
 } from "@/lib/tauri";
+import { formatTime, truncate } from "@/lib/format";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
 const entries = ref<ClipboardEntry[]>([]);
@@ -128,19 +129,6 @@ const intervalOptions = [
   { label: "5s", value: 5000 },
 ];
 
-function formatTime(iso: string): string {
-  try {
-    const d = new Date(iso);
-    return d.toLocaleString("zh-CN");
-  } catch {
-    return iso;
-  }
-}
-
-function truncate(text: string, len: number): string {
-  return text.length > len ? text.slice(0, len) + "..." : text;
-}
-
 function typeIcon(type: string) {
   if (type === "text") return FileText;
   if (type === "image") return Image;
@@ -234,6 +222,7 @@ function onImageError(event: Event) {
               :class="entry.is_favorite ? 'text-yellow-500' : 'text-ink-faint hover:text-yellow-500'"
               @click="toggleFavorite(entry.id)"
               :title="entry.is_favorite ? '取消收藏' : '收藏'"
+              :aria-label="entry.is_favorite ? '取消收藏' : '收藏'"
             >
               <Star class="h-4 w-4" :fill="entry.is_favorite ? 'currentColor' : 'none'" />
             </button>
@@ -241,6 +230,7 @@ function onImageError(event: Event) {
               class="rounded-lg p-1.5 text-ink-faint transition-colors hover:text-bamboo"
               @click="copyEntry(entry.id)"
               :title="copiedId === entry.id ? '已复制!' : '复制'"
+              :aria-label="copiedId === entry.id ? '已复制' : '复制到剪贴板'"
             >
               <Copy class="h-4 w-4" />
             </button>
@@ -248,6 +238,7 @@ function onImageError(event: Event) {
               class="rounded-lg p-1.5 text-ink-faint transition-colors hover:text-red-500"
               @click="deleteEntry(entry.id)"
               title="删除"
+              aria-label="删除"
             >
               <X class="h-4 w-4" />
             </button>

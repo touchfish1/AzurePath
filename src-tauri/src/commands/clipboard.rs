@@ -7,6 +7,7 @@ use tauri::AppHandle;
 use tauri::Emitter;
 use tauri::image::Image;
 use tauri_plugin_clipboard_manager::ClipboardExt;
+use tracing::{info, warn};
 
 static CLIPBOARD_STORE: OnceLock<Arc<ClipboardStore>> = OnceLock::new();
 static CLIPBOARD_MONITOR: OnceLock<ClipboardMonitor> = OnceLock::new();
@@ -43,7 +44,7 @@ pub async fn clipboard_start(app: AppHandle) -> Result<(), String> {
         m.start().await;
     }
 
-    println!("[clipboard] Monitor started");
+    info!("[clipboard] Monitor started");
     Ok(())
 }
 
@@ -111,7 +112,7 @@ pub async fn clipboard_copy(id: String, app: AppHandle) -> Result<(), String> {
                 .map_err(|e| format!("Failed to write image to clipboard: {}", e))?;
         }
         "file" => {
-            eprintln!("[clipboard] write_files not supported by clipboard plugin; skipping");
+            warn!("[clipboard] write_files not supported by clipboard plugin; skipping");
         }
         _ => return Err(format!("Unknown content type: {}", entry.content_type)),
     }
@@ -137,7 +138,7 @@ pub async fn clipboard_set_interval(ms: u64) -> Result<(), String> {
         return Err("Interval must be between 200ms and 60000ms".to_string());
     }
     monitor.set_interval_ms(ms);
-    println!("[clipboard] Interval set to {}ms", ms);
+    info!("[clipboard] Interval set to {}ms", ms);
     Ok(())
 }
 
@@ -150,11 +151,11 @@ pub(crate) async fn handle_frame(incoming: &crate::core::connection::IncomingFra
         };
         for entry in entries {
             if entry.content_bytes() > MAX_CLIPBOARD_BYTES {
-                eprintln!("[clipboard] Skipping synced entry exceeding size limit");
+                warn!("[clipboard] Skipping synced entry exceeding size limit");
                 continue;
             }
             if let Err(e) = store.insert(entry) {
-                eprintln!("[clipboard] Failed to save synced entry: {}", e);
+                warn!("[clipboard] Failed to save synced entry: {}", e);
             }
         }
         let _ = app.emit("clipboard:synced", entries);

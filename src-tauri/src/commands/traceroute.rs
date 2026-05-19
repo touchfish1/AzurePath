@@ -13,15 +13,7 @@ static CANCEL_TOKENS: LazyLock<Mutex<HashMap<String, AtomicBool>>> =
 
 /// Decode process output bytes to UTF-8, handling system locale encoding (e.g. GBK on Chinese Windows).
 fn decode_line(bytes: &[u8]) -> String {
-    #[cfg(target_os = "windows")]
-    {
-        String::from_utf8(bytes.to_vec())
-            .unwrap_or_else(|_| encoding_rs::GBK.decode(bytes).0.to_string())
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        String::from_utf8_lossy(bytes).to_string()
-    }
+    crate::core::utils::decode_output(bytes)
 }
 
 #[tauri::command]

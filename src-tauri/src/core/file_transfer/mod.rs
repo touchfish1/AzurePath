@@ -10,6 +10,7 @@ pub use sender::FileSender;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{Mutex, oneshot};
+use tracing::info;
 
 pub struct FileResponseInfo {
     pub accepted: bool,
@@ -49,7 +50,7 @@ impl FileTransferService {
         // Start the receiver inline (blocks until the TCP listener is bound),
         // so the port is immediately available to callers like file_accept.
         let port = receiver.clone().start_listener().await?;
-        println!("[file] Receiver ready on port {}", port);
+        info!("[file] Receiver ready on port {}", port);
 
         Ok(Self {
             sender: Arc::new(FileSender::new()),

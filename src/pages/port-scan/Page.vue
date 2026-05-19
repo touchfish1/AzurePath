@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted } from "vue";
-import { Play, Square } from "lucide-vue-next";
+import { Play, Square, Scan } from "lucide-vue-next";
 import Button from "@/components/ui/button/Button.vue";
 import { usePortScanStore } from "@/stores/portScan";
 
@@ -142,12 +142,25 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- No ports found -->
+    <!-- No ports found / Empty state -->
     <div
-      v-if="!store.running && store.completeInfo && store.foundPorts.length === 0"
-      class="rounded-xl border border-paper-deep/60 bg-paper-warm/50 px-5 py-4 text-center text-sm text-ink-faint animate-fade-in"
+      v-if="store.foundPorts.length === 0 && !store.running"
+      class="flex items-center justify-center rounded-xl border border-dashed border-paper-deep/30 bg-paper-warm/20 py-16 text-sm text-ink-faint"
     >
-      未发现开放端口
+      <div v-if="store.completeInfo" class="text-center">
+        <Scan class="mx-auto h-8 w-8 mb-2 opacity-40" />
+        <p>未发现开放端口</p>
+        <p class="mt-1 text-xs opacity-60">目标主机可能未运行任何服务或防火墙已过滤端口</p>
+      </div>
+      <div v-else class="text-center max-w-sm">
+        <Scan class="mx-auto h-10 w-10 mb-3 opacity-30" />
+        <p class="font-medium text-ink-soft">输入目标 IP 或域名开始端口扫描</p>
+        <p class="mt-2 text-xs opacity-60 leading-relaxed">
+          支持自定义端口范围，默认扫描常用端口
+          <br />
+          扫描结果将显示所有开放端口及对应服务
+        </p>
+      </div>
     </div>
   </div>
 </template>

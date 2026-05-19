@@ -17,7 +17,6 @@ import {
   snifferExport,
   onSnifferProgress,
   onSnifferDevice,
-  onSnifferPort,
   onSnifferComplete,
   onSnifferError,
   type DeviceResult,
@@ -108,21 +107,22 @@ function toggleDevice(ip: string) {
 
 function serviceClass(service: string | null): string {
   const map: Record<string, string> = {
-    HTTP: "tag-http",
-    HTTPS: "tag-https",
-    "HTTP-Alt": "tag-http",
-    "HTTPS-Alt": "tag-https",
-    SSH: "tag-ssh",
-    MySQL: "tag-mysql",
-    PostgreSQL: "tag-mysql",
-    Redis: "tag-redis",
-    SMB: "tag-smb",
-    DNS: "tag-dns",
+    HTTP: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300",
+    HTTPS: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300",
+    "HTTP-Alt": "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300",
+    "HTTPS-Alt": "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300",
+    SSH: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300",
+    MySQL: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300",
+    PostgreSQL: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300",
+    Redis: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300",
+    SMB: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300",
+    DNS: "bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-300",
   };
-  return map[service || ""] || "tag-unknown";
+  return map[service || ""] || "bg-gray-100 text-gray-600 dark:bg-gray-800/40 dark:text-gray-400";
 }
 
 async function startScan() {
+  cleanup();
   scanState.value = "scanning";
   errorMsg.value = "";
   devices.value = [];
@@ -149,9 +149,6 @@ async function startScan() {
     });
     unlisteners.push(unlistenDevice);
 
-    const unlistenPort = await onSnifferPort(() => {});
-    unlisteners.push(unlistenPort);
-
     const unlistenComplete = await onSnifferComplete(() => {
       scanState.value = "completed";
     });
@@ -165,7 +162,7 @@ async function startScan() {
 
     const tid = await snifferStart(options);
     taskId.value = tid;
-  } catch (e: any) {
+  } catch (e: unknown) {
     errorMsg.value = typeof e === "string" ? e : "启动扫描失败";
     scanState.value = "error";
   }
@@ -433,6 +430,11 @@ onUnmounted(cleanup);
             <div
               class="flex cursor-pointer items-center gap-3 px-4 py-3 text-sm transition-colors hover:bg-paper-warm/50"
               @click="toggleDevice(device.ip)"
+              @keydown.enter="toggleDevice(device.ip)"
+              @keydown.space.prevent="toggleDevice(device.ip)"
+              role="button"
+              :aria-expanded="expandedDevices.has(device.ip)"
+              tabindex="0"
             >
               <ChevronDown
                 class="h-3.5 w-3.5 text-ink-faint transition-transform"
@@ -444,7 +446,7 @@ onUnmounted(cleanup);
               </span>
               <span
                 class="rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase"
-                :class="device.scanMode === 'deep' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'"
+                :class="device.scanMode === 'deep' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'"
               >
                 {{ device.scanMode }}
               </span>
@@ -552,37 +554,3 @@ onUnmounted(cleanup);
   </div>
 </template>
 
-<style scoped>
-.tag-http {
-  background: #d4e8f7;
-  color: #2a6a9e;
-}
-.tag-https {
-  background: #d4e8f7;
-  color: #2a6a9e;
-}
-.tag-ssh {
-  background: #d4f0d4;
-  color: #2a7a2a;
-}
-.tag-mysql {
-  background: #f7e8d4;
-  color: #9e6a2a;
-}
-.tag-redis {
-  background: #f7d4d4;
-  color: #9e2a2a;
-}
-.tag-smb {
-  background: #f0f0d4;
-  color: #7a7a2a;
-}
-.tag-dns {
-  background: #d4f0f0;
-  color: #2a7a7a;
-}
-.tag-unknown {
-  background: #eee;
-  color: #888;
-}
-</style>

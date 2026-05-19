@@ -189,11 +189,8 @@ impl ChatStore {
     }
 }
 
-fn home_dir() -> Option<std::path::PathBuf> {
-    std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .ok()
-        .map(std::path::PathBuf::from)
+fn home_dir() -> Option<PathBuf> {
+    crate::core::utils::home_dir()
 }
 
 #[cfg(test)]

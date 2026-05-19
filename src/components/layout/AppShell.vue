@@ -1,10 +1,14 @@
 <script setup lang="ts">
 import { onMounted } from "vue";
 import { useThemeStore } from "@/stores/theme";
+import { useKeyboardShortcuts } from "@/composables/useKeyboardShortcuts";
 import TitleBar from "./TitleBar.vue";
 import Sidebar from "./Sidebar.vue";
+import UpdateBanner from "@/components/UpdateBanner.vue";
 
 const themeStore = useThemeStore();
+
+useKeyboardShortcuts();
 
 onMounted(() => {
   themeStore.init();
@@ -15,6 +19,9 @@ onMounted(() => {
   <div class="flex h-screen w-screen flex-col overflow-hidden">
     <!-- Title bar (window chrome) -->
     <TitleBar />
+
+    <!-- Update banner -->
+    <UpdateBanner />
 
     <!-- Body: sidebar + main content -->
     <div class="flex flex-1 overflow-hidden">

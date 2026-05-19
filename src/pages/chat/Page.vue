@@ -16,15 +16,13 @@ import {
   onChatMessage,
   onPeerList,
   onPeerOffline,
-  onFileRequest,
-  onFileProgress,
-  onFileComplete,
-  onFileError,
   type StoredMessage,
   type PeerInfo,
   type FileTransfer,
   type FileSendResult,
 } from "@/lib/tauri";
+import { formatTime, formatSize, progressPercent } from "@/lib/format";
+import { useFileTransferListeners } from "@/composables/useFileTransfer";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 
@@ -44,10 +42,8 @@ const incomingRequest = ref<{ fileId: string; filename: string; size: number; fr
 let unlistenMessage: UnlistenFn | null = null;
 let unlistenPeerList: UnlistenFn | null = null;
 let unlistenPeerOffline: UnlistenFn | null = null;
-let unlistenFileRequest: UnlistenFn | null = null;
-let unlistenFileProgress: UnlistenFn | null = null;
-let unlistenFileComplete: UnlistenFn | null = null;
-let unlistenFileError: UnlistenFn | null = null;
+
+const { setup: setupFileListeners, teardown: teardownFileListeners } = useFileTransferListeners(transfers, incomingRequest);
 
 const selectedPeer = computed(() =>
   peers.value.find((p) => p.id === selectedPeerId.value),
@@ -126,54 +122,14 @@ onMounted(async () => {
     if (peer) peer.status = "offline";
   });
 
-  unlistenFileRequest = await onFileRequest((req) => {
-    incomingRequest.value = req;
-    transfers.value.unshift({
-      id: req.fileId,
-      filename: req.filename,
-      path: null,
-      size: req.size,
-      received: 0,
-      status: "pending",
-      peer_id: req.from,
-      is_incoming: true,
-      created_at: new Date().toISOString(),
-    });
-  });
-
-  unlistenFileProgress = await onFileProgress((p) => {
-    const t = transfers.value.find((x) => x.id === p.fileId);
-    if (t) {
-      t.received = p.received;
-      t.size = p.total;
-      t.status = "transferring";
-    }
-  });
-
-  unlistenFileComplete = await onFileComplete(async (p) => {
-    const t = transfers.value.find((x) => x.id === p.fileId);
-    if (t) {
-      t.status = "completed";
-      t.received = t.size;
-      t.path = p.path;
-      t.download_url = p.downloadUrl;
-    }
-  });
-
-  unlistenFileError = await onFileError((p) => {
-    const t = transfers.value.find((x) => x.id === p.fileId);
-    if (t) t.status = `error: ${p.error}`;
-  });
+  await setupFileListeners();
 });
 
 onUnmounted(() => {
   unlistenMessage?.();
   unlistenPeerList?.();
   unlistenPeerOffline?.();
-  unlistenFileRequest?.();
-  unlistenFileProgress?.();
-  unlistenFileComplete?.();
-  unlistenFileError?.();
+  teardownFileListeners();
 });
 
 async function sendMessage() {
@@ -310,29 +266,6 @@ function handleReject() {
   incomingRequest.value = null;
 }
 
-function formatTime(iso: string): string {
-  try {
-    const d = new Date(iso);
-    return d.toLocaleTimeString("zh-CN", {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return iso;
-  }
-}
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function progressPercent(t: FileTransfer): number {
-  if (t.size === 0) return 0;
-  return Math.round((t.received / t.size) * 100);
-}
-
 function statusClass(status: string): string {
   if (status === "completed") return "bg-bamboo/10 text-bamboo";
   if (status === "transferring") return "bg-blue-100 text-blue-600";
@@ -375,6 +308,7 @@ async function copyDownloadUrl(t: FileTransfer) {
           class="flex w-full items-center gap-3 px-4 py-3 text-sm transition-colors hover:bg-paper-deep/30"
           :class="selectedPeerId === '*' ? 'bg-bamboo/10 text-bamboo border-l-2 border-bamboo' : 'text-ink-soft'"
           @click="selectedPeerId = '*'"
+          :aria-selected="selectedPeerId === '*'"
         >
           <MessageSquare class="h-4 w-4" />
           <span class="font-medium">广播</span>
@@ -389,6 +323,7 @@ async function copyDownloadUrl(t: FileTransfer) {
           class="flex w-full items-center gap-3 px-4 py-2.5 text-sm transition-colors hover:bg-paper-deep/30"
           :class="selectedPeerId === peer.id ? 'bg-bamboo/10 text-bamboo border-l-2 border-bamboo' : 'text-ink-soft'"
           @click="selectedPeerId = peer.id"
+          :aria-selected="selectedPeerId === peer.id"
         >
           <Wifi class="h-3.5 w-3.5 text-bamboo shrink-0" />
           <div class="min-w-0 text-left">
@@ -406,6 +341,7 @@ async function copyDownloadUrl(t: FileTransfer) {
           class="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-ink-faint transition-colors hover:bg-paper-deep/30"
           :class="selectedPeerId === peer.id ? 'bg-paper-deep/30 border-l-2 border-paper-deep' : ''"
           @click="selectedPeerId = peer.id"
+          :aria-selected="selectedPeerId === peer.id"
         >
           <WifiOff class="h-3.5 w-3.5 shrink-0" />
           <div class="min-w-0 text-left">
@@ -497,7 +433,7 @@ async function copyDownloadUrl(t: FileTransfer) {
               <div v-if="t.status === 'transferring' && t.size > 0" class="mt-2 h-1.5 rounded-full bg-paper-deep/30 overflow-hidden">
                 <div
                   class="h-full rounded-full bg-bamboo transition-all duration-300"
-                  :style="{ width: progressPercent(t) + '%' }"
+                  :style="{ width: progressPercent(t.received, t.size) + '%' }"
                 />
               </div>
               <div class="mt-1 text-xs text-ink-faint">
@@ -607,11 +543,11 @@ async function copyDownloadUrl(t: FileTransfer) {
             </div>
           </div>
           <div class="flex justify-end gap-2 mt-6">
-            <Button variant="danger" @click="handleReject">
+            <Button variant="danger" @click="handleReject" aria-label="拒绝文件">
               <XCircle class="mr-1.5 h-3.5 w-3.5" />
               拒绝
             </Button>
-            <Button @click="handleAccept">
+            <Button @click="handleAccept" aria-label="接受文件">
               <Download class="mr-1.5 h-3.5 w-3.5" />
               接受
             </Button>

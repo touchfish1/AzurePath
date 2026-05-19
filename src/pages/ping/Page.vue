@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted } from "vue";
-import { Play, Square } from "lucide-vue-next";
+import { Play, Square, Radio } from "lucide-vue-next";
 import Button from "@/components/ui/button/Button.vue";
 import { usePingStore } from "@/stores/ping";
 
@@ -146,6 +146,22 @@ onUnmounted(() => {
             </tr>
           </tbody>
         </table>
+      </div>
+    </div>
+
+    <!-- Empty state guide -->
+    <div
+      v-else-if="!store.running && !store.error"
+      class="flex items-center justify-center rounded-xl border border-dashed border-paper-deep/30 bg-paper-warm/20 py-16 text-sm text-ink-faint"
+    >
+      <div class="text-center max-w-sm">
+        <Radio class="mx-auto h-10 w-10 mb-3 opacity-30" />
+        <p class="font-medium text-ink-soft">输入目标 IP 或域名开始 Ping 测试</p>
+        <p class="mt-2 text-xs opacity-60 leading-relaxed">
+          支持 IPv4 地址和域名
+          <br />
+          默认发送 4 个数据包，可调整发送次数和超时时间
+        </p>
       </div>
     </div>
 

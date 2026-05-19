@@ -9,3 +9,4 @@ pub mod ping;
 pub mod network_sniffer;
 pub mod port_scan;
 pub mod traceroute;
+pub mod utils;

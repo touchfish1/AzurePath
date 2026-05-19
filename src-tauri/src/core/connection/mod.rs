@@ -8,6 +8,7 @@ use std::sync::Arc;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, Mutex};
+use tracing::{info, warn};
 
 pub const LISTEN_PORT: u16 = 42070;
 
@@ -55,7 +56,7 @@ impl ConnectionManager {
         let listener = TcpListener::bind(&addr)
             .await
             .map_err(|e| format!("Failed to bind TCP listener: {}", e))?;
-        println!("[conn] TCP listener started on {}", addr);
+        info!("[conn] TCP listener started on {}", addr);
 
         let this = self.clone();
         tokio::spawn(async move {
@@ -66,7 +67,7 @@ impl ConnectionManager {
                 match listener.accept().await {
                     Ok((stream, peer_addr)) => {
                         let peer_addr_str = peer_addr.to_string();
-                        println!("[conn] Incoming TCP from {}", peer_addr_str);
+                        info!("[conn] Incoming TCP from {}", peer_addr_str);
                         let this_clone = this.clone();
                         tokio::spawn(async move {
                             this_clone
@@ -74,7 +75,7 @@ impl ConnectionManager {
                                 .await;
                         });
                     }
-                    Err(e) => eprintln!("[conn] Accept error: {}", e),
+                    Err(e) => warn!("[conn] Accept error: {}", e),
                 }
             }
         });
@@ -91,25 +92,25 @@ impl ConnectionManager {
         let peer_id = match read_frame(&mut stream).await {
             Ok(Some(Frame::Hello { id })) => id,
             Ok(Some(_)) => {
-                eprintln!("[conn] Expected hello from {}, got other frame", addr);
+                warn!("[conn] Expected hello from {}, got other frame", addr);
                 return;
             }
             Ok(None) => {
-                println!("[conn] Connection closed during hello from {}", addr);
+                info!("[conn] Connection closed during hello from {}", addr);
                 return;
             }
             Err(e) => {
-                eprintln!("[conn] Error reading hello from {}: {}", addr, e);
+                warn!("[conn] Error reading hello from {}: {}", addr, e);
                 return;
             }
         };
 
-        println!("[conn] Peer {} identified as {}", addr, peer_id);
+        info!("[conn] Peer {} identified as {}", addr, peer_id);
 
         // Send our hello
         let my_id = get_my_id().await;
         if let Err(e) = write_frame(&mut stream, &Frame::Hello { id: my_id }).await {
-            eprintln!("[conn] Failed to send hello to {}: {}", peer_id, e);
+            warn!("[conn] Failed to send hello to {}: {}", peer_id, e);
             return;
         }
 
@@ -142,7 +143,7 @@ impl ConnectionManager {
         peer_addr: &str,
     ) -> Result<(), String> {
         let addr = format!("{}:{}", peer_addr, LISTEN_PORT);
-        println!("[conn] Connecting to {} at {}", peer_id, addr);
+        info!("[conn] Connecting to {} at {}", peer_id, addr);
         let mut stream =
             TcpStream::connect(&addr)
                 .await
@@ -162,7 +163,7 @@ impl ConnectionManager {
             Err(e) => return Err(e),
         };
 
-        println!("[conn] Connected to peer {}", peer_id);
+        info!("[conn] Connected to peer {}", peer_id);
 
         let (reader, writer) = stream.into_split();
         let conn = Arc::new(PeerConnection {
@@ -226,11 +227,11 @@ impl ConnectionManager {
                         }
                     }
                     Ok(None) => {
-                        println!("[conn] {} disconnected", peer_id);
+                        info!("[conn] {} disconnected", peer_id);
                         break;
                     }
                     Err(e) => {
-                        eprintln!("[conn] Read error from {}: {}", peer_id, e);
+                        warn!("[conn] Read error from {}: {}", peer_id, e);
                         break;
                     }
                 }
@@ -275,11 +276,23 @@ impl ConnectionManager {
             let conns = self.connections.lock().await;
             collect_peers(&conns)
         };
-        for conn in &peers {
-            let mut writer = conn.writer.lock().await;
-            if let Err(e) = write_frame(&mut *writer, frame).await {
-                eprintln!("[conn] Failed to broadcast to {}: {}", conn.peer_id, e);
-            }
+
+        // Send to all peers concurrently for better throughput
+        let handles: Vec<_> = peers
+            .into_iter()
+            .map(|conn| {
+                let frame = frame.clone();
+                tokio::spawn(async move {
+                    let mut writer = conn.writer.lock().await;
+                    if let Err(e) = write_frame(&mut *writer, &frame).await {
+                        warn!("[conn] Failed to broadcast to {}: {}", conn.peer_id, e);
+                    }
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            let _ = handle.await;
         }
     }
 
@@ -684,9 +697,61 @@ mod tests {
         // broadcast only logs the error – it never panics).
         for conn in &peers {
             // This is exactly what broadcast does internally, minus the
-            // eprintln! — we just verify it doesn't panic.
+            // warn! — we just verify it doesn't panic.
             let mut writer = conn.writer.lock().await;
             let _ = write_frame(&mut *writer, &Frame::Ping).await;
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Broadcast — content verification
+    // ------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_broadcast() {
+        let cm = Arc::new(ConnectionManager::new());
+        let (conn_a, mut server_a) = make_peer("alice").await;
+        let (conn_b, mut server_b) = make_peer("bob").await;
+
+        {
+            let mut conns = cm.connections.lock().await;
+            conns.insert("alice".to_string(), conn_a);
+            conns.insert("bob".to_string(), conn_b);
+        }
+
+        // Broadcast a system frame to all peers
+        cm.broadcast(&Frame::System {
+            content: "hello everyone".into(),
+        })
+        .await;
+
+        // Read frames back from each server-side socket to verify delivery
+        let frame_a = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            read_frame(&mut server_a),
+        )
+        .await
+        .expect("timeout reading from alice's server socket")
+        .expect("read_frame error for alice")
+        .expect("alice should have received a frame (not EOF)");
+
+        let frame_b = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            read_frame(&mut server_b),
+        )
+        .await
+        .expect("timeout reading from bob's server socket")
+        .expect("read_frame error for bob")
+        .expect("bob should have received a frame (not EOF)");
+
+        // Verify both peers received the correct frame
+        match &frame_a {
+            Frame::System { content } => assert_eq!(content, "hello everyone"),
+            other => panic!("Expected System frame for alice, got {:?}", other),
+        }
+        match &frame_b {
+            Frame::System { content } => assert_eq!(content, "hello everyone"),
+            other => panic!("Expected System frame for bob, got {:?}", other),
         }
     }
 }

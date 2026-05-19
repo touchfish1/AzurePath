@@ -8,6 +8,7 @@ use std::sync::OnceLock;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::oneshot;
+use tracing::info;
 use uuid::Uuid;
 
 #[derive(Serialize)]
@@ -177,7 +178,7 @@ pub async fn file_transfer_init(app: AppHandle) -> Result<(), String> {
     // Keep server alive (drop is intentional — JoinHandle will die with process)
     std::mem::forget(server);
 
-    println!("[file] File server ready on port {}", FILE_SERVER.get().map(|s| s.port()).unwrap_or(0));
+    info!("[file] File server ready on port {}", FILE_SERVER.get().map(|s| s.port()).unwrap_or(0));
 
     Ok(())
 }
@@ -278,22 +279,22 @@ pub async fn file_send(
                 // Entry already removed by deliver_response — no leak.
             }
             Ok(Ok(_)) => {
-                println!("[file] Peer rejected file transfer");
+                info!("[file] Peer rejected file transfer");
                 // Entry already removed by deliver_response — no leak.
             }
             Ok(Err(_)) => {
-                println!("[file] File response channel closed");
+                info!("[file] File response channel closed");
                 // Oneshot sender dropped without delivery — clean up.
                 svc.remove_pending_response(&file_id).await;
             }
             Err(_) => {
-                println!("[file] File request timed out (no response in 30s)");
+                info!("[file] File request timed out (no response in 30s)");
                 // Clean up orphaned pending response to prevent memory leak.
                 svc.remove_pending_response(&file_id).await;
             }
         }
     } else {
-        println!("[file] Failed to send file request to peer");
+        info!("[file] Failed to send file request to peer");
         // Request was never sent — clean up the pending response entry.
         svc.remove_pending_response(&file_id).await;
     }

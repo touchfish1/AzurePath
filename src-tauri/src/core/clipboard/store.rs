@@ -32,10 +32,9 @@ impl ClipboardStore {
     }
 
     fn db_path() -> Result<PathBuf, String> {
-        let home = std::env::var("USERPROFILE")
-            .or_else(|_| std::env::var("HOME"))
-            .map_err(|_| "Cannot find home directory".to_string())?;
-        Ok(PathBuf::from(home).join("AzurePath").join("azurepath.db"))
+        let home = crate::core::utils::home_dir()
+            .ok_or_else(|| "Cannot find home directory".to_string())?;
+        Ok(home.join("AzurePath").join("azurepath.db"))
     }
 
     fn init_tables(&self) -> Result<(), String> {
