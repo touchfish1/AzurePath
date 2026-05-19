@@ -47,6 +47,10 @@ pub enum Frame {
     Ping,
     #[serde(rename = "pong")]
     Pong,
+    #[serde(rename = "clipboard_sync")]
+    ClipboardSync {
+        entries: Vec<crate::types::clipboard::ClipboardEntry>,
+    },
 }
 
 /// Stored chat message (SQLite row).
