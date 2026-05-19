@@ -84,9 +84,7 @@ impl ClipboardStore {
                 format!(
                     "SELECT id, content_type, text_content, image_path, file_paths, content_hash, is_favorite, created_at
                      FROM clipboard_entries
-                     WHERE content_type = 'text' AND text_content LIKE ?1
-                        OR content_type = 'image'
-                        OR content_type = 'file'
+                     WHERE text_content LIKE ?1
                      ORDER BY is_favorite DESC, created_at DESC LIMIT ?2"
                 ),
                 2,
