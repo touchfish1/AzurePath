@@ -28,6 +28,7 @@ pub fn run() {
             commands::file_transfer::file_accept,
             commands::file_transfer::file_reject,
             commands::file_transfer::file_list,
+            commands::file_transfer::file_broadcast,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -41,10 +41,36 @@ pub(crate) async fn handle_frame(incoming: &IncomingFrame, app: &AppHandle) {
             accepted,
             data_port,
         } => {
-            // Route the response to the waiting sender task
             let accepted = *accepted;
             let data_port = *data_port;
-            let _ = svc.deliver_response(file_id, FileResponseInfo { accepted, data_port }).await;
+
+            // Check if this is a broadcast file (multiple peers may respond)
+            if svc.is_broadcast_file(file_id).await {
+                if accepted {
+                    if let Some(info) = svc.get_broadcast_info(file_id).await {
+                        let transfer_id = Uuid::new_v4().to_string();
+                        // Look up responding peer's IP address
+                        let peer_addr = match crate::commands::discovery::DISCOVERY.get() {
+                            Some(d) => d.get_peer(&incoming.peer_id).await
+                                .map(|p| p.ip.clone())
+                                .unwrap_or_default(),
+                            None => "unknown".to_string(),
+                        };
+                        svc.start_transfer_after_response(
+                            &transfer_id,
+                            &peer_addr,
+                            data_port,
+                            &info.file_path,
+                            &info.filename,
+                            info.file_size,
+                            &incoming.peer_id,
+                        ).await;
+                    }
+                }
+            } else {
+                // Original oneshot flow for unicast
+                let _ = svc.deliver_response(file_id, FileResponseInfo { accepted, data_port }).await;
+            }
         }
         crate::types::chat::Frame::FileProgress {
             file_id,
@@ -106,9 +132,9 @@ pub async fn file_transfer_init(_app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-pub(crate) fn set_file_conn_mgr(mgr: Arc<crate::core::connection::ConnectionManager>) {
+pub(crate) async fn set_file_conn_mgr(mgr: Arc<crate::core::connection::ConnectionManager>) {
     if let Some(svc) = FILE_SVC.get() {
-        svc.set_conn_mgr(mgr);
+        svc.set_conn_mgr(mgr).await;
     }
 }
 
@@ -257,4 +283,41 @@ pub async fn file_reject(file_id: String) -> Result<(), String> {
 pub async fn file_list() -> Result<Vec<FileTransfer>, String> {
     let svc = FILE_SVC.get().ok_or("File transfer not initialized")?;
     Ok(svc.list_transfers().await)
+}
+
+#[tauri::command]
+pub async fn file_broadcast(path: String) -> Result<String, String> {
+    let svc = FILE_SVC.get().ok_or("File transfer not initialized")?;
+
+    let file_path = std::path::PathBuf::from(&path);
+    let metadata =
+        std::fs::metadata(&file_path).map_err(|e| format!("Cannot read file: {}", e))?;
+    let file_size = metadata.len();
+    let filename = file_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or("Invalid filename")?
+        .to_string();
+
+    let conn_mgr = match crate::commands::chat::CONN_MGR.get() {
+        Some(c) => c,
+        None => return Err("Connection manager not initialized".to_string()),
+    };
+
+    let file_id = Uuid::new_v4().to_string();
+
+    // Register as broadcast file so responses are handled correctly
+    svc.register_broadcast(&file_id, &path, &filename, file_size).await;
+
+    // Send FileRequest to ALL connected peers
+    conn_mgr
+        .broadcast(&crate::types::chat::Frame::FileRequest {
+            file_id: file_id.clone(),
+            filename: filename.clone(),
+            size: file_size,
+            from: crate::core::discovery::my_id().await,
+        })
+        .await;
+
+    Ok(file_id)
 }

@@ -325,6 +325,11 @@ export function fileSend(target: string, path: string): Promise<string> {
   return invoke<string>("file_send", { target, path });
 }
 
+/** Broadcast a file to all connected peers. Returns the broadcast file ID. */
+export function fileBroadcast(path: string): Promise<string> {
+  return invoke<string>("file_broadcast", { path });
+}
+
 /** Accept an incoming file transfer. */
 export function fileAccept(fileId: string, receiverPort: number): Promise<void> {
   return invoke<void>("file_accept", { fileId, receiverPort });

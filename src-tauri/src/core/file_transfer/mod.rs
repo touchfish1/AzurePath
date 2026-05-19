@@ -15,6 +15,13 @@ pub struct FileResponseInfo {
     pub data_port: u16,
 }
 
+#[derive(Clone)]
+pub struct BroadcastFileState {
+    pub file_path: String,
+    pub filename: String,
+    pub file_size: u64,
+}
+
 pub struct FileTransferService {
     sender: Arc<FileSender>,
     receiver: Arc<FileReceiver>,
@@ -28,6 +35,8 @@ pub struct FileTransferService {
     request_senders: Arc<Mutex<HashMap<String, String>>>,
     /// Connection manager for sending progress frames
     conn_mgr: Arc<Mutex<Option<Arc<ConnectionManager>>>>,
+    /// Broadcast file state: broadcast_file_id -> file metadata
+    broadcast_files: Arc<Mutex<HashMap<String, BroadcastFileState>>>,
 }
 
 impl FileTransferService {
@@ -55,11 +64,12 @@ impl FileTransferService {
             pending_responses: Arc::new(Mutex::new(HashMap::new())),
             request_senders: Arc::new(Mutex::new(HashMap::new())),
             conn_mgr: Arc::new(Mutex::new(None)),
+            broadcast_files: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
-    pub fn set_conn_mgr(&self, mgr: Arc<ConnectionManager>) {
-        *self.conn_mgr.blocking_lock() = Some(mgr);
+    pub async fn set_conn_mgr(&self, mgr: Arc<ConnectionManager>) {
+        *self.conn_mgr.lock().await = Some(mgr);
     }
 
     /// Get the port the receiver is listening on.
@@ -220,5 +230,24 @@ impl FileTransferService {
         let mut list: Vec<FileTransfer> = transfers.values().cloned().collect();
         list.sort_by(|a, b| b.created_at.cmp(&a.created_at));
         list
+    }
+
+    /// Register a broadcast file (sent to all peers).
+    pub async fn register_broadcast(&self, file_id: &str, file_path: &str, filename: &str, file_size: u64) {
+        self.broadcast_files.lock().await.insert(file_id.to_string(), BroadcastFileState {
+            file_path: file_path.to_string(),
+            filename: filename.to_string(),
+            file_size,
+        });
+    }
+
+    /// Check if a file_id is a broadcast file.
+    pub async fn is_broadcast_file(&self, file_id: &str) -> bool {
+        self.broadcast_files.lock().await.contains_key(file_id)
+    }
+
+    /// Get broadcast file state by file_id.
+    pub async fn get_broadcast_info(&self, file_id: &str) -> Option<BroadcastFileState> {
+        self.broadcast_files.lock().await.get(file_id).cloned()
     }
 }

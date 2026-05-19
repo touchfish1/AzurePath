@@ -8,6 +8,7 @@ import {
   chatBroadcast,
   chatMessages,
   fileSend,
+  fileBroadcast,
   fileAccept,
   fileReject,
   fileList,
@@ -75,7 +76,6 @@ const peerTransfers = computed(() => {
 
 const canSendFile = computed(() =>
   !sendingFile.value &&
-  selectedPeerId.value !== "*" &&
   filePath.value.trim().length > 0
 );
 
@@ -196,23 +196,28 @@ async function sendMessage() {
 
 async function sendFileMessage() {
   const path = filePath.value.trim();
-  if (!path || sendingFile.value || selectedPeerId.value === "*") return;
+  if (!path || sendingFile.value) return;
 
   sendingFile.value = true;
   try {
-    const fileId = await fileSend(selectedPeerId.value, path);
-    const filename = path.split("/").pop() || path.split("\\").pop() || "unknown";
-    transfers.value.unshift({
-      id: fileId,
-      filename,
-      path: path,
-      size: 0,
-      received: 0,
-      status: "transferring",
-      peer_id: selectedPeerId.value,
-      is_incoming: false,
-      created_at: new Date().toISOString(),
-    });
+    if (selectedPeerId.value === "*") {
+      // Broadcast to all connected peers
+      await fileBroadcast(path);
+    } else {
+      const fileId = await fileSend(selectedPeerId.value, path);
+      const filename = path.split("/").pop() || path.split("\\").pop() || "unknown";
+      transfers.value.unshift({
+        id: fileId,
+        filename,
+        path: path,
+        size: 0,
+        received: 0,
+        status: "transferring",
+        peer_id: selectedPeerId.value,
+        is_incoming: false,
+        created_at: new Date().toISOString(),
+      });
+    }
     filePath.value = "";
     showFileInput.value = false;
   } catch (e) {
@@ -442,7 +447,6 @@ function statusClass(status: string): string {
                 发送文件
               </Button>
             </div>
-            <p v-if="selectedPeerId === '*'" class="mt-1 text-xs text-orange-500">广播模式不支持发送文件，请选择特定设备</p>
           </div>
 
           <!-- Text input -->
@@ -469,7 +473,7 @@ function statusClass(status: string): string {
             </Button>
           </div>
           <p class="mt-1.5 text-xs text-ink-faint">
-            {{ selectedPeerId === '*' ? '消息将广播到所有在线设备' : selectedPeer ? `发送给 ${selectedPeer.hostname} (${selectedPeer.ip})` : '选择收信人' }}
+            {{ selectedPeerId === '*' ? '消息和文件将广播到所有在线设备' : selectedPeer ? `发送给 ${selectedPeer.hostname} (${selectedPeer.ip})` : '选择收信人' }}
           </p>
         </div>
       </div>
