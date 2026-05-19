@@ -5,6 +5,19 @@ use std::net::{TcpListener, TcpStream};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
+/// Wrapper that recovers from a poisoned mutex by locking a new Mutex, effectively
+/// restarting the shared state. Used to prevent a single panicking handler from
+/// permanently disabling the file server.
+fn lock_map(map: &Mutex<HashMap<String, String>>) -> std::sync::MutexGuard<'_, HashMap<String, String>> {
+    match map.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            eprintln!("[file_server] Mutex was poisoned, recovering");
+            poisoned.into_inner()
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct FileServerHandle {
     port: u16,
@@ -61,12 +74,12 @@ impl FileServerHandle {
     }
 
     pub fn register_file(&self, file_id: &str, file_path: &str) {
-        let mut map = self.files.lock().unwrap();
+        let mut map = lock_map(&self.files);
         map.insert(file_id.to_string(), file_path.to_string());
     }
 
     pub fn get_path(&self, file_id: &str) -> Option<String> {
-        let map = self.files.lock().unwrap();
+        let map = lock_map(&self.files);
         map.get(file_id).cloned()
     }
 
@@ -121,7 +134,7 @@ fn handle_request(mut stream: TcpStream, files: &Arc<Mutex<HashMap<String, Strin
     let file_id = path_parts[2];
 
     let file_path = {
-        let map = files.lock().unwrap();
+        let map = lock_map(files);
         map.get(file_id).cloned()
     };
 
@@ -155,10 +168,14 @@ fn serve_file(stream: &mut TcpStream, file_path: &str) {
     };
 
     let size = metadata.len();
-    let filename = path
+    let filename_raw = path
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("download");
+
+    // SECURITY: Sanitize filename for HTTP headers to prevent injection
+    // (e.g., CRLF injection, quote injection in Content-Disposition).
+    let filename = sanitize_header_filename(filename_raw);
 
     let response_headers = format!(
         "HTTP/1.1 200 OK\r\n\
@@ -203,4 +220,67 @@ fn send_response(stream: &mut TcpStream, status: u16, reason: &str, body: &[u8])
     );
     let _ = stream.write_all(response.as_bytes());
     let _ = stream.write_all(body);
+}
+
+/// Sanitize a filename for use in HTTP Content-Disposition headers.
+/// Strips characters that could enable header injection (CR, LF, quotes).
+fn sanitize_header_filename(name: &str) -> String {
+    let mut result = String::with_capacity(name.len());
+    for c in name.chars() {
+        match c {
+            '\r' | '\n' | '"' | '\\' => result.push('_'),
+            _ => result.push(c),
+        }
+    }
+    if result.is_empty() {
+        result = "download".to_string();
+    }
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sanitize_header_filename_removes_injection_chars() {
+        // \r and \n both become _, dot is preserved
+        assert_eq!(sanitize_header_filename("file\r\n.txt"), "file__.txt");
+        assert_eq!(sanitize_header_filename("file\".txt"), "file_.txt");
+        assert_eq!(sanitize_header_filename("file\\.txt"), "file_.txt");
+    }
+
+    #[test]
+    fn test_sanitize_header_filename_normal() {
+        assert_eq!(sanitize_header_filename("document.pdf"), "document.pdf");
+        assert_eq!(sanitize_header_filename("my file.txt"), "my file.txt");
+    }
+
+    #[test]
+    fn test_sanitize_header_filename_empty_becomes_default() {
+        assert_eq!(sanitize_header_filename(""), "download");
+    }
+
+    #[test]
+    fn test_url_encode_special_chars() {
+        assert_eq!(url_encode("hello world"), "hello%20world");
+        assert_eq!(url_encode("foo/bar"), "foo%2Fbar");
+        assert_eq!(url_encode("normal.txt"), "normal.txt");
+    }
+
+    #[test]
+    fn test_lock_map_recovers_from_poison() {
+        let map = Arc::new(Mutex::new(HashMap::new()));
+        // Poison the lock
+        let map_clone = map.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = map_clone.lock().unwrap();
+            panic!("intentional panic to poison mutex");
+        })
+        .join();
+
+        // lock_map should recover, not panic
+        let guard = lock_map(&map);
+        assert!(guard.is_empty());
+    }
 }

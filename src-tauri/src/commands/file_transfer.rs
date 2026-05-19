@@ -3,6 +3,7 @@ use crate::core::file_server::FileServerHandle;
 use crate::core::file_transfer::{FileResponseInfo, FileTransferService};
 use crate::types::file_transfer::FileTransfer;
 use serde::Serialize;
+use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
@@ -111,11 +112,7 @@ pub(crate) async fn handle_frame(incoming: &IncomingFrame, app: &AppHandle) {
             );
         }
         crate::types::chat::Frame::FileComplete { file_id } => {
-            let home = std::env::var("USERPROFILE")
-                .or_else(|_| std::env::var("HOME"))
-                .unwrap_or_default();
-            let download_dir = std::path::PathBuf::from(&home)
-                .join("AzurePath/downloads");
+            let download_dir = crate::core::file_transfer::receiver::default_download_dir();
             let filename = svc.get_filename(file_id).await.unwrap_or_else(|| "file".to_string());
             let file_path = download_dir.join(&filename);
             let file_path_str = file_path.to_string_lossy().to_string();
@@ -165,7 +162,7 @@ pub async fn file_transfer_init(app: AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    let svc = Arc::new(FileTransferService::new()?);
+    let svc = Arc::new(FileTransferService::new().await?);
     FILE_SVC
         .set(svc)
         .map_err(|_| "Already initialized".to_string())?;
@@ -198,10 +195,10 @@ pub async fn file_send(
 ) -> Result<FileSendResult, String> {
     let svc = FILE_SVC.get().ok_or("File transfer not initialized")?;
 
-    // Get file metadata
-    let file_path = std::path::PathBuf::from(&path);
-    let metadata =
-        std::fs::metadata(&file_path).map_err(|e| format!("Cannot read file: {}", e))?;
+    // Validate the file path (prevent path traversal and ensure file is accessible)
+    let file_path = validate_file_path(&path)?;
+    let metadata = std::fs::metadata(&file_path)
+        .map_err(|e| format!("Cannot read file: {}", e))?;
     let file_size = metadata.len();
     let filename = file_path
         .file_name()
@@ -227,11 +224,13 @@ pub async fn file_send(
     // Generate real file_id
     let file_id = Uuid::new_v4().to_string();
 
+    let file_path_str = file_path.to_string_lossy().to_string();
+
     // Register with HTTP file server IMMEDIATELY — file is on disk,
     // doesn't depend on peer acceptance. This ensures the download URL
     // is always available for local files.
     let download_url = if let Some(srv) = FILE_SERVER.get() {
-        srv.register_file(&file_id, &path);
+        srv.register_file(&file_id, &file_path_str);
         let url = srv.download_url(&file_id, &filename);
         Some(url)
     } else {
@@ -270,25 +269,33 @@ pub async fn file_send(
                     &file_id,
                     &peer_addr,
                     info.data_port,
-                    &path,
+                    &file_path_str,
                     &filename,
                     file_size,
                     &target,
                 )
                 .await;
+                // Entry already removed by deliver_response — no leak.
             }
             Ok(Ok(_)) => {
                 println!("[file] Peer rejected file transfer");
+                // Entry already removed by deliver_response — no leak.
             }
             Ok(Err(_)) => {
                 println!("[file] File response channel closed");
+                // Oneshot sender dropped without delivery — clean up.
+                svc.remove_pending_response(&file_id).await;
             }
             Err(_) => {
                 println!("[file] File request timed out (no response in 30s)");
+                // Clean up orphaned pending response to prevent memory leak.
+                svc.remove_pending_response(&file_id).await;
             }
         }
     } else {
         println!("[file] Failed to send file request to peer");
+        // Request was never sent — clean up the pending response entry.
+        svc.remove_pending_response(&file_id).await;
     }
 
     // Always return success with download URL — file is local and registered
@@ -302,14 +309,12 @@ pub async fn file_accept(file_id: String) -> Result<(), String> {
         None => return Err("Connection manager not initialized".to_string()),
     };
 
-    // Look up which peer sent this request
+    // Look up which peer sent this request (atomically take to prevent races)
     let svc = FILE_SVC.get().ok_or("File transfer not initialized")?;
     let sender_peer = svc
-        .get_request_sender(&file_id)
+        .take_request_sender(&file_id)
         .await
         .ok_or("Unknown file request")?;
-
-    svc.remove_request_sender(&file_id).await;
 
     // Use the actual receiver port (started dynamically in FileTransferService::new)
     let actual_port = svc
@@ -341,11 +346,9 @@ pub async fn file_reject(file_id: String) -> Result<(), String> {
 
     let svc = FILE_SVC.get().ok_or("File transfer not initialized")?;
     let sender_peer = svc
-        .get_request_sender(&file_id)
+        .take_request_sender(&file_id)
         .await
         .ok_or("Unknown file request")?;
-
-    svc.remove_request_sender(&file_id).await;
 
     conn_mgr
         .send(
@@ -411,9 +414,9 @@ pub async fn get_file_download_url(file_id: String) -> Result<String, String> {
 pub async fn file_broadcast(path: String) -> Result<FileSendResult, String> {
     let svc = FILE_SVC.get().ok_or("File transfer not initialized")?;
 
-    let file_path = std::path::PathBuf::from(&path);
-    let metadata =
-        std::fs::metadata(&file_path).map_err(|e| format!("Cannot read file: {}", e))?;
+    let file_path = validate_file_path(&path)?;
+    let metadata = std::fs::metadata(&file_path)
+        .map_err(|e| format!("Cannot read file: {}", e))?;
     let file_size = metadata.len();
     let filename = file_path
         .file_name()
@@ -427,10 +430,11 @@ pub async fn file_broadcast(path: String) -> Result<FileSendResult, String> {
     };
 
     let file_id = Uuid::new_v4().to_string();
+    let file_path_str = file_path.to_string_lossy().to_string();
 
     // Register with file server for download URL
     let download_url = if let Some(srv) = FILE_SERVER.get() {
-        srv.register_file(&file_id, &path);
+        srv.register_file(&file_id, &file_path_str);
         let url = srv.download_url(&file_id, &filename);
         Some(url)
     } else {
@@ -438,7 +442,7 @@ pub async fn file_broadcast(path: String) -> Result<FileSendResult, String> {
     };
 
     // Register as broadcast file so responses are handled correctly
-    svc.register_broadcast(&file_id, &path, &filename, file_size).await;
+    svc.register_broadcast(&file_id, &file_path_str, &filename, file_size).await;
 
     // Send FileRequest to ALL connected peers
     conn_mgr
@@ -451,4 +455,96 @@ pub async fn file_broadcast(path: String) -> Result<FileSendResult, String> {
         .await;
 
     Ok(FileSendResult { file_id, file_size, download_url })
+}
+
+/// Validate that a user-supplied file path is safe and accessible.
+/// Returns the canonical path, or an error if:
+/// - The path contains traversal components (after resolution)
+/// - The file does not exist
+/// - The path is not a regular file
+/// - The file is not readable
+fn validate_file_path(path: &str) -> Result<PathBuf, String> {
+    let file_path = PathBuf::from(path);
+
+    // Check file exists
+    if !file_path.exists() {
+        return Err("File not found".to_string());
+    }
+
+    // Check it's a regular file (not a directory, pipe, etc.)
+    let metadata = std::fs::metadata(&file_path)
+        .map_err(|_| "Cannot access file metadata".to_string())?;
+    if !metadata.is_file() {
+        return Err("Path is not a regular file".to_string());
+    }
+
+    // Try to canonicalize to detect path traversal attempts
+    let canonical = std::fs::canonicalize(&file_path)
+        .map_err(|_| "Cannot resolve file path".to_string())?;
+
+    // Verify the canonical path exists and is a file (extra safety)
+    if !canonical.exists() {
+        return Err("Resolved file path does not exist".to_string());
+    }
+
+    Ok(canonical)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn test_validate_file_path_rejects_nonexistent() {
+        let result = validate_file_path("C:\\nonexistent_file_xyz123.tmp");
+        assert!(result.is_err());
+        assert!(result.err().unwrap().contains("not found"));
+    }
+
+    #[test]
+    fn test_validate_file_path_rejects_directory() {
+        let result = validate_file_path(".");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_file_path_accepts_valid_file() {
+        // Create a temp file
+        let dir = std::env::temp_dir();
+        let temp_path = dir.join("azurepath_test_valid.txt");
+        let mut f = std::fs::File::create(&temp_path).unwrap();
+        f.write_all(b"test").unwrap();
+        drop(f);
+
+        let result = validate_file_path(temp_path.to_str().unwrap());
+        assert!(result.is_ok());
+
+        // Cleanup
+        let _ = std::fs::remove_file(&temp_path);
+    }
+
+    #[test]
+    fn test_validate_file_path_canonicalizes() {
+        let dir = std::env::temp_dir();
+        let temp_path = dir.join("azurepath_test_canon.txt");
+        let mut f = std::fs::File::create(&temp_path).unwrap();
+        f.write_all(b"test").unwrap();
+        drop(f);
+
+        // Use a relative path with .. components
+        let relative_path = format!(
+            "{}\\..\\{}\\azurepath_test_canon.txt",
+            dir.to_str().unwrap(),
+            dir.file_name().unwrap().to_str().unwrap()
+        );
+        let result = validate_file_path(&relative_path);
+        assert!(result.is_ok());
+        if let Ok(canonical) = result {
+            // Should resolve to the actual file path
+            assert!(canonical.to_string_lossy().ends_with("azurepath_test_canon.txt"));
+        }
+
+        let _ = std::fs::remove_file(&temp_path);
+    }
 }

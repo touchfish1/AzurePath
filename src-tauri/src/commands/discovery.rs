@@ -48,3 +48,26 @@ pub async fn discovery_stop() -> Result<(), String> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_peers_before_start_returns_empty() {
+        let result = discovery_peers().await;
+        assert!(result.is_ok(), "peers should not error before start");
+        assert!(result.unwrap().is_empty(), "peer list should be empty before start");
+    }
+
+    #[tokio::test]
+    async fn test_stop_before_start_is_noop() {
+        let result = discovery_stop().await;
+        assert!(result.is_ok(), "stop should not error before start");
+    }
+
+    #[test]
+    fn test_static_not_initialized() {
+        assert!(DISCOVERY.get().is_none(), "DISCOVERY must be None before discovery_start");
+    }
+}

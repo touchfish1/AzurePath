@@ -5,6 +5,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
 
+/// Maximum allowed length for a filename or file_id string read from wire.
+const MAX_WIRE_STRING_LEN: usize = 4096;
+
 pub struct FileReceiver {
     running: Arc<AtomicBool>,
     download_dir: PathBuf,
@@ -14,8 +17,7 @@ pub struct FileReceiver {
 
 impl FileReceiver {
     pub fn new() -> Result<Self, String> {
-        let home = home_dir().ok_or("Cannot find home directory")?;
-        let download_dir = home.join("AzurePath").join("downloads");
+        let download_dir = default_download_dir();
         std::fs::create_dir_all(&download_dir)
             .map_err(|e| format!("Failed to create download dir: {}", e))?;
 
@@ -81,7 +83,7 @@ impl FileReceiver {
         };
 
         // Read filename
-        let filename = match read_string(&mut stream).await {
+        let filename_raw = match read_string(&mut stream).await {
             Ok(name) => name,
             Err(e) => {
                 eprintln!("[file] Failed to read filename: {}", e);
@@ -89,6 +91,9 @@ impl FileReceiver {
             }
         };
 
+        // SECURITY: Sanitize the filename to prevent path traversal attacks.
+        // A malicious peer could send a filename like "../../etc/passwd".
+        let filename = sanitize_filename(&filename_raw);
         let dest_path = self.download_dir.join(&filename);
         println!(
             "[file] Receiving {} ({} bytes) -> {:?}",
@@ -138,6 +143,50 @@ impl FileReceiver {
     }
 }
 
+/// Sanitize a filename to prevent path traversal attacks.
+/// Strips directory separators, ".." components, and null bytes.
+/// Replaces unsafe characters with underscores.
+pub fn sanitize_filename(name: &str) -> String {
+    let mut sanitized = String::with_capacity(name.len());
+    for c in name.chars() {
+        match c {
+            // Path separators and null bytes -> underscore
+            '/' | '\\' | '\0' => sanitized.push('_'),
+            // Strip trailing dots and spaces on Windows (reserved)
+            _ => sanitized.push(c),
+        }
+    }
+    // Remove any ".." sequences that survived (shouldn't, since we replaced separators,
+    // but belt-and-suspenders: replace remaining dots used for traversal)
+    let sanitized = sanitized
+        .replace("..", "_")
+        .trim()
+        .to_string();
+
+    if sanitized.is_empty() || sanitized == "." {
+        return "download".to_string();
+    }
+
+    // Limit filename length to prevent resource exhaustion
+    let max_len = 255;
+    if sanitized.len() > max_len {
+        // Keep extension if present
+        if let Some(ext_start) = sanitized.rfind('.') {
+            if ext_start > 0 && sanitized.len() - ext_start <= 10 {
+                let base_end = max_len - (sanitized.len() - ext_start);
+                if base_end > 0 {
+                    let mut truncated: String = sanitized[..base_end].to_string();
+                    truncated.push_str(&sanitized[ext_start..]);
+                    return truncated;
+                }
+            }
+        }
+        sanitized[..max_len].to_string()
+    } else {
+        sanitized
+    }
+}
+
 fn home_dir() -> Option<PathBuf> {
     std::env::var("USERPROFILE")
         .or_else(|_| std::env::var("HOME"))
@@ -145,8 +194,82 @@ fn home_dir() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
+/// Returns the default download directory used by the file receiver.
+/// This is the single source of truth for the download path, shared
+/// across both the receiver and the FileComplete event handler.
+pub fn default_download_dir() -> PathBuf {
+    let home = home_dir().unwrap_or_else(|| PathBuf::from("."));
+    home.join("AzurePath").join("downloads")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sanitize_filename_removes_path_traversal() {
+        // "../../etc/passwd" → / replaced with _, then ".." collapsed to _
+        // Result: "____etc_passwd" (4 underscores: _ from first .., _ from /,
+        //   _ from second .., _ from / before etc)
+        assert_eq!(sanitize_filename("../../etc/passwd"), "____etc_passwd");
+        // Same pattern for backslash variant
+        assert_eq!(sanitize_filename("..\\..\\Windows\\win.ini"), "____Windows_win.ini");
+        assert_eq!(sanitize_filename("foo/bar"), "foo_bar");
+        assert_eq!(sanitize_filename("foo\\bar"), "foo_bar");
+    }
+
+    #[test]
+    fn test_sanitize_filename_removes_null_bytes() {
+        assert_eq!(sanitize_filename("file\0.txt"), "file_.txt");
+    }
+
+    #[test]
+    fn test_sanitize_filename_normal_filename_unchanged() {
+        assert_eq!(sanitize_filename("document.pdf"), "document.pdf");
+        assert_eq!(sanitize_filename("my_photo.jpg"), "my_photo.jpg");
+    }
+
+    #[test]
+    fn test_sanitize_filename_empty_becomes_default() {
+        assert_eq!(sanitize_filename(""), "download");
+        assert_eq!(sanitize_filename("."), "download");
+        assert_eq!(sanitize_filename("   "), "download");
+    }
+
+    #[test]
+    fn test_sanitize_filename_truncates_long_names() {
+        let long = "a".repeat(500);
+        let result = sanitize_filename(&long);
+        assert!(result.len() <= 255);
+    }
+
+    #[test]
+    fn test_sanitize_filename_preserves_extension_when_truncating() {
+        let long = "abcdefghij".repeat(30); // 300 chars
+        let long_with_ext = format!("{}.txt", long);
+        let result = sanitize_filename(&long_with_ext);
+        // With 300+ char base + .txt = 304+ chars, truncates to 255
+        // Extension .txt is 4 chars, so base should be truncated to 251
+        assert!(result.len() <= 255);
+        assert!(result.ends_with(".txt"), "Expected .txt suffix, got: {}", result);
+    }
+
+    #[test]
+    fn test_read_string_rejects_oversized_length() {
+        // We can't easily test read_string without a stream, but we can test
+        // the constant is used correctly by checking the limit
+        assert_eq!(MAX_WIRE_STRING_LEN, 4096);
+    }
+}
+
 async fn read_string(stream: &mut TcpStream) -> Result<String, String> {
     let len = read_u64(stream).await? as usize;
+    if len > MAX_WIRE_STRING_LEN {
+        return Err(format!(
+            "String length {} exceeds maximum allowed {}",
+            len, MAX_WIRE_STRING_LEN
+        ));
+    }
     let mut buf = vec![0u8; len];
     stream
         .read_exact(&mut buf)

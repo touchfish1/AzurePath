@@ -8,7 +8,12 @@ const store = usePortScanStore();
 
 onMounted(async () => {
   if (store.currentTaskId) {
-    await store.attachListeners();
+    // Component re-mounted while a scan appears to be running.  The scan may
+    // have already completed while we were unmounted (and thus unsubscribed
+    // from events), so the "port:complete" payload would have been lost.
+    // Clean up: cancel any still-running background task and reset state.
+    await store.stop();
+    store.reset();
   }
 });
 

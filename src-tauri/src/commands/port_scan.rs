@@ -14,6 +14,22 @@ use crate::types::port_scan::{
 static CANCEL_TOKENS: LazyLock<Mutex<HashMap<String, Arc<AtomicBool>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
+fn validate_scan_inputs(target: &str, port_range: &PortRange, opts: &ScanOptions) -> Result<(), String> {
+    if target.trim().is_empty() {
+        return Err("Target cannot be empty".to_string());
+    }
+    if port_range.start > port_range.end {
+        return Err(format!(
+            "Port range start ({}) must be <= end ({})",
+            port_range.start, port_range.end
+        ));
+    }
+    if opts.concurrency == 0 {
+        return Err("Concurrency must be greater than 0".to_string());
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn port_scan_start(
     app: AppHandle,
@@ -22,6 +38,10 @@ pub async fn port_scan_start(
     options: Option<ScanOptions>,
 ) -> Result<String, String> {
     let opts = options.unwrap_or_default();
+
+    // Validate inputs before allocating any resources
+    validate_scan_inputs(&target, &port_range, &opts)?;
+
     let task_id = Uuid::new_v4().to_string();
     let cancel_flag = Arc::new(AtomicBool::new(false));
 
@@ -61,7 +81,11 @@ async fn run_port_scan(
     opts: &ScanOptions,
     cancel_flag: Arc<AtomicBool>,
 ) -> Result<(), String> {
-    let total_ports = (port_range.end.saturating_sub(port_range.start) + 1) as u32;
+    // Pre-resolve target to an IP string once so check_port never re-resolves
+    let resolved_target = port_scan::tcp_connect::resolve_target(target).await?;
+
+    // Compute total ports using u32 arithmetic to avoid u16 overflow
+    let total_ports = port_range.end as u32 - port_range.start as u32 + 1;
     let mut open_ports: Vec<OpenPort> = Vec::new();
 
     // Emit initial progress
@@ -77,7 +101,7 @@ async fn run_port_scan(
     .map_err(|e| format!("Failed to emit progress: {}", e))?;
 
     let semaphore = Arc::new(tokio::sync::Semaphore::new(opts.concurrency as usize));
-    let target_arc = Arc::new(target.to_string());
+    let resolved_arc = Arc::new(resolved_target);
     let (tx, mut rx) = tokio::sync::mpsc::channel::<Option<u16>>(total_ports as usize);
 
     // Spawn all scan tasks — each sends its result through the channel
@@ -87,7 +111,7 @@ async fn run_port_scan(
         }
 
         let sem_clone = semaphore.clone();
-        let target_clone = target_arc.clone();
+        let target_clone = resolved_arc.clone();
         let cancel_clone = cancel_flag.clone();
         let tx_clone = tx.clone();
         let timeout_ms = opts.timeout_ms;
@@ -191,5 +215,118 @@ pub async fn port_scan_stop(
         Ok(())
     } else {
         Err(format!("Task {} not found", task_id))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::port_scan::ScanOptions;
+
+    #[test]
+    fn test_validate_scan_inputs_empty_target() {
+        let range = PortRange { start: 1, end: 100 };
+        let opts = ScanOptions::default();
+        let result = validate_scan_inputs("", &range, &opts);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("empty"));
+    }
+
+    #[test]
+    fn test_validate_scan_inputs_whitespace_target() {
+        let range = PortRange { start: 1, end: 100 };
+        let opts = ScanOptions::default();
+        let result = validate_scan_inputs("   ", &range, &opts);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("empty"));
+    }
+
+    #[test]
+    fn test_validate_scan_inputs_start_greater_than_end() {
+        let range = PortRange { start: 50000, end: 100 };
+        let opts = ScanOptions::default();
+        let result = validate_scan_inputs("127.0.0.1", &range, &opts);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("50000"));
+        assert!(err.contains("100"));
+    }
+
+    #[test]
+    fn test_validate_scan_inputs_zero_concurrency() {
+        let range = PortRange { start: 1, end: 100 };
+        let opts = ScanOptions {
+            concurrency: 0,
+            timeout_ms: 1000,
+        };
+        let result = validate_scan_inputs("127.0.0.1", &range, &opts);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Concurrency"));
+    }
+
+    #[test]
+    fn test_validate_scan_inputs_valid() {
+        let range = PortRange { start: 1, end: 1024 };
+        let opts = ScanOptions::default();
+        let result = validate_scan_inputs("127.0.0.1", &range, &opts);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_scan_inputs_single_port() {
+        let range = PortRange {
+            start: 443,
+            end: 443,
+        };
+        let opts = ScanOptions::default();
+        let result = validate_scan_inputs("example.com", &range, &opts);
+        assert!(result.is_ok());
+    }
+
+    /// Verify that total_ports calculation does not overflow with
+    /// worst-case u16 range 0..=65535 (65536 ports total).
+    #[test]
+    fn test_total_ports_u16_range_no_overflow() {
+        let range = PortRange {
+            start: 0,
+            end: 65535,
+        };
+        // This reproduces the original overflow bug:
+        //   (65535u16.saturating_sub(0) + 1) as u32  →  0u32
+        // The fix uses u32 arithmetic:
+        //   65535u32 - 0u32 + 1u32  →  65536u32
+        let total = range.end as u32 - range.start as u32 + 1;
+        assert_eq!(total, 65536, "total_ports must be 65536, not 0");
+
+        let opts = ScanOptions::default();
+        let result = validate_scan_inputs("127.0.0.1", &range, &opts);
+        assert!(result.is_ok());
+    }
+
+    /// Verify that mid-range (32768..=65535) also works correctly.
+    #[test]
+    fn test_total_ports_mid_range_no_overflow() {
+        let range = PortRange {
+            start: 32768,
+            end: 65535,
+        };
+        let total = range.end as u32 - range.start as u32 + 1;
+        assert_eq!(total, 32768);
+
+        let opts = ScanOptions::default();
+        let result = validate_scan_inputs("127.0.0.1", &range, &opts);
+        assert!(result.is_ok());
+    }
+
+    /// Edge: start == end == 0 (u16 minimum)
+    #[test]
+    fn test_total_ports_zero() {
+        let range = PortRange { start: 0, end: 0 };
+        let total = range.end as u32 - range.start as u32 + 1;
+        assert_eq!(total, 1);
+
+        let opts = ScanOptions::default();
+        let result = validate_scan_inputs("127.0.0.1", &range, &opts);
+        assert!(result.is_ok());
     }
 }

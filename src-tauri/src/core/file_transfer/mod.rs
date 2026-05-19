@@ -1,4 +1,4 @@
-mod receiver;
+pub mod receiver;
 mod sender;
 
 use crate::core::connection::ConnectionManager;
@@ -41,27 +41,21 @@ pub struct FileTransferService {
 }
 
 impl FileTransferService {
-    pub fn new() -> Result<Self, String> {
+    /// Create a new file transfer service and start the receiver synchronously.
+    /// The returned service always has a valid receiver port.
+    pub async fn new() -> Result<Self, String> {
         let receiver = Arc::new(FileReceiver::new()?);
-        let receiver_port = Arc::new(Mutex::new(None));
 
-        let recv = receiver.clone();
-        let port_holder = receiver_port.clone();
-        tokio::spawn(async move {
-            match recv.start_listener().await {
-                Ok(port) => {
-                    *port_holder.lock().await = Some(port);
-                    println!("[file] Receiver ready on port {}", port);
-                }
-                Err(e) => eprintln!("[file] Failed to start receiver: {}", e),
-            }
-        });
+        // Start the receiver inline (blocks until the TCP listener is bound),
+        // so the port is immediately available to callers like file_accept.
+        let port = receiver.clone().start_listener().await?;
+        println!("[file] Receiver ready on port {}", port);
 
         Ok(Self {
             sender: Arc::new(FileSender::new()),
             receiver,
             transfers: Arc::new(Mutex::new(HashMap::new())),
-            receiver_port,
+            receiver_port: Arc::new(Mutex::new(Some(port))),
             pending_responses: Arc::new(Mutex::new(HashMap::new())),
             request_senders: Arc::new(Mutex::new(HashMap::new())),
             conn_mgr: Arc::new(Mutex::new(None)),
@@ -91,6 +85,12 @@ impl FileTransferService {
         } else {
             false
         }
+    }
+
+    /// Remove a pending response entry (e.g. on timeout or error).
+    /// Prevents memory leaks when the response never arrives.
+    pub async fn remove_pending_response(&self, file_id: &str) {
+        self.pending_responses.lock().await.remove(file_id);
     }
 
     /// Start a transfer after receiving FileResponse.accepted.
@@ -203,6 +203,12 @@ impl FileTransferService {
         self.request_senders.lock().await.remove(file_id);
     }
 
+    /// Atomically take and remove the sender peer_id for an incoming file request.
+    /// Prevents race conditions where two handlers get the same sender.
+    pub async fn take_request_sender(&self, file_id: &str) -> Option<String> {
+        self.request_senders.lock().await.remove(file_id)
+    }
+
     /// Track an incoming file (created when file_request is received).
     pub async fn register_incoming(
         &self,
@@ -292,5 +298,153 @@ impl FileTransferService {
     /// Get broadcast file state by file_id.
     pub async fn get_broadcast_info(&self, file_id: &str) -> Option<BroadcastFileState> {
         self.broadcast_files.lock().await.get(file_id).cloned()
+    }
+
+    /// Remove a broadcast file record after it has been processed.
+    pub async fn remove_broadcast(&self, file_id: &str) {
+        self.broadcast_files.lock().await.remove(file_id);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_register_and_list_transfers() {
+        let svc = FileTransferService::new().await.unwrap();
+
+        svc.register_incoming("id1", "test.txt", 1024, "peer1").await;
+        svc.register_incoming("id2", "photo.jpg", 2048, "peer2").await;
+
+        let list = svc.list_transfers().await;
+        assert_eq!(list.len(), 2);
+
+        let id1 = list.iter().find(|t| t.id == "id1").unwrap();
+        assert_eq!(id1.filename, "test.txt");
+        assert_eq!(id1.size, 1024);
+        assert_eq!(id1.status, "pending");
+        assert!(id1.is_incoming);
+
+        let id2 = list.iter().find(|t| t.id == "id2").unwrap();
+        assert_eq!(id2.filename, "photo.jpg");
+        assert_eq!(id2.size, 2048);
+    }
+
+    #[tokio::test]
+    async fn test_update_progress() {
+        let svc = FileTransferService::new().await.unwrap();
+        svc.register_incoming("id1", "test.txt", 1000, "peer1").await;
+
+        svc.update_progress("id1", 500, 1000).await;
+        let list = svc.list_transfers().await;
+        let t = list.iter().find(|t| t.id == "id1").unwrap();
+        assert_eq!(t.received, 500);
+        assert_eq!(t.size, 1000);
+    }
+
+    #[tokio::test]
+    async fn test_mark_complete() {
+        let svc = FileTransferService::new().await.unwrap();
+        svc.register_incoming("id1", "test.txt", 1000, "peer1").await;
+
+        svc.mark_complete("id1", Some("/tmp/test.txt".to_string())).await;
+        let list = svc.list_transfers().await;
+        let t = list.iter().find(|t| t.id == "id1").unwrap();
+        assert_eq!(t.status, "completed");
+        assert_eq!(t.path.as_deref(), Some("/tmp/test.txt"));
+        assert_eq!(t.received, t.size);
+    }
+
+    #[tokio::test]
+    async fn test_mark_error() {
+        let svc = FileTransferService::new().await.unwrap();
+        svc.register_incoming("id1", "test.txt", 1000, "peer1").await;
+
+        svc.mark_error("id1", "disk full").await;
+        let list = svc.list_transfers().await;
+        let t = list.iter().find(|t| t.id == "id1").unwrap();
+        assert!(t.status.starts_with("error:"));
+    }
+
+    #[tokio::test]
+    async fn test_request_sender_take_is_atomic() {
+        let svc = FileTransferService::new().await.unwrap();
+        svc.register_request_sender("id1", "peer1").await;
+
+        // First take should succeed
+        let taken = svc.take_request_sender("id1").await;
+        assert_eq!(taken, Some("peer1".to_string()));
+
+        // Second take should return None (already removed)
+        let taken2 = svc.take_request_sender("id1").await;
+        assert_eq!(taken2, None);
+    }
+
+    #[tokio::test]
+    async fn test_broadcast_register_and_cleanup() {
+        let svc = FileTransferService::new().await.unwrap();
+        svc.register_broadcast("id1", "/tmp/test.txt", "test.txt", 1000).await;
+
+        assert!(svc.is_broadcast_file("id1").await);
+        let info = svc.get_broadcast_info("id1").await;
+        assert!(info.is_some());
+        assert_eq!(info.unwrap().filename, "test.txt");
+
+        svc.remove_broadcast("id1").await;
+        assert!(!svc.is_broadcast_file("id1").await);
+    }
+
+    #[tokio::test]
+    async fn test_get_filename() {
+        let svc = FileTransferService::new().await.unwrap();
+        svc.register_incoming("id1", "test.txt", 1000, "peer1").await;
+
+        let name = svc.get_filename("id1").await;
+        assert_eq!(name, Some("test.txt".to_string()));
+
+        let missing = svc.get_filename("nonexistent").await;
+        assert_eq!(missing, None);
+    }
+
+    #[tokio::test]
+    async fn test_set_download_url() {
+        let svc = FileTransferService::new().await.unwrap();
+        svc.register_incoming("id1", "test.txt", 1000, "peer1").await;
+
+        svc.set_download_url("id1", "http://localhost:8080/download/id1/test.txt").await;
+        let list = svc.list_transfers().await;
+        let t = list.iter().find(|t| t.id == "id1").unwrap();
+        assert_eq!(
+            t.download_url.as_deref(),
+            Some("http://localhost:8080/download/id1/test.txt")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_deliver_response() {
+        let svc = FileTransferService::new().await.unwrap();
+        let (tx, rx) = oneshot::channel::<FileResponseInfo>();
+        svc.register_pending_response("id1", tx).await;
+
+        let delivered = svc.deliver_response("id1", FileResponseInfo { accepted: true, data_port: 12345 }).await;
+        assert!(delivered);
+
+        let response = rx.await.unwrap();
+        assert!(response.accepted);
+        assert_eq!(response.data_port, 12345);
+
+        // Second delivery should fail (already consumed)
+        let delivered2 = svc.deliver_response("id1", FileResponseInfo { accepted: false, data_port: 0 }).await;
+        assert!(!delivered2);
+    }
+
+    #[tokio::test]
+    async fn test_receiver_port_always_ready() {
+        let svc = FileTransferService::new().await.unwrap();
+        // Port is always available now (receiver started synchronously in new())
+        let port = svc.get_receiver_port().await;
+        assert!(port.is_some(), "receiver port should be available immediately after construction");
+        assert!(port.unwrap() > 0, "receiver port should be a valid port number");
     }
 }
