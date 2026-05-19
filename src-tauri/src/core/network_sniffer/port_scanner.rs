@@ -40,13 +40,10 @@ pub async fn scan_ports(
                 if cancel.load(Ordering::SeqCst) {
                     return None;
                 }
-                match TcpStream::connect_timeout(
-                    &(target.as_str(), port).into(),
-                    timeout,
-                )
+                match tokio::time::timeout(timeout, TcpStream::connect((target.as_str(), port)))
                 .await
                 {
-                    Ok(_) => Some(PortResult {
+                    Ok(Ok(_)) => Some(PortResult {
                         port,
                         protocol: "tcp".to_string(),
                         state: "open".to_string(),
@@ -56,13 +53,13 @@ pub async fn scan_ports(
                         confidence: 0,
                         probe_method: "tcp_connect".to_string(),
                     }),
-                    Err(_) => None,
+                    _ => None,
                 }
             }));
         }
 
         for h in handles {
-            if let Some(Some(port_result)) = h.await.ok().flatten() {
+            if let Some(port_result) = h.await.ok().flatten() {
                 results.push(port_result);
             }
         }

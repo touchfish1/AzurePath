@@ -14,7 +14,7 @@ pub async fn is_host_alive(
 ) -> bool {
     let timeout = Duration::from_millis(timeout_ms);
     for &port in PROBE_PORTS {
-        if TcpStream::connect_timeout(&(ip, port).into(), timeout).await.is_ok() {
+        if let Ok(Ok(_)) = tokio::time::timeout(timeout, TcpStream::connect((ip, port))).await {
             return true;
         }
     }
