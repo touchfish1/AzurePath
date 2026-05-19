@@ -1,4 +1,5 @@
 pub mod chat;
+pub mod clipboard;
 pub mod connection;
 pub mod discovery;
 pub mod dns;
