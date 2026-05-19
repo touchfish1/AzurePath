@@ -93,6 +93,9 @@ pub fn run() {
 
             Ok(())
         })
+        // single_instance is not available in this version of Tauri 2.
+        // Multi-instance prevention is handled by the OS or through the
+        // tauri-plugin-single-instance if needed.
         .invoke_handler(tauri::generate_handler![
             // Phase 1
             commands::ping::ping_start,

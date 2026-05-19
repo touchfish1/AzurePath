@@ -320,3 +320,237 @@ fn get_counters_procfs() -> Result<HashMap<String, CounterSnapshot>, String> {
 
     Ok(counters)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── compute_samples ───────────────────────────────────────────
+
+    #[test]
+    fn test_compute_samples_basic() {
+        let mut prev = HashMap::new();
+        prev.insert("eth0".to_string(), CounterSnapshot { rx: 1000, tx: 500 });
+        let mut curr = HashMap::new();
+        curr.insert("eth0".to_string(), CounterSnapshot { rx: 2000, tx: 800 });
+
+        let samples = compute_samples(&prev, &curr, 1.0);
+        // One per-interface sample + one aggregate
+        assert_eq!(samples.len(), 2);
+
+        let eth0 = samples.iter().find(|s| s.interface == "eth0").unwrap();
+        assert_eq!(eth0.download_bps, 1000); // (2000 - 1000) / 1.0
+        assert_eq!(eth0.upload_bps, 300);    // (800 - 500) / 1.0
+        assert_eq!(eth0.total_rx, 2000);
+        assert_eq!(eth0.total_tx, 800);
+
+        let agg = samples.iter().find(|s| s.interface == "*").unwrap();
+        assert_eq!(agg.download_bps, 1000);
+        assert_eq!(agg.upload_bps, 300);
+        assert_eq!(agg.total_rx, 2000);
+        assert_eq!(agg.total_tx, 800);
+    }
+
+    #[test]
+    fn test_compute_samples_aggregate_all_interfaces() {
+        let mut prev = HashMap::new();
+        prev.insert("eth0".to_string(), CounterSnapshot { rx: 1000, tx: 500 });
+        prev.insert("eth1".to_string(), CounterSnapshot { rx: 2000, tx: 1000 });
+        let mut curr = HashMap::new();
+        curr.insert("eth0".to_string(), CounterSnapshot { rx: 2000, tx: 800 });
+        curr.insert("eth1".to_string(), CounterSnapshot { rx: 4000, tx: 2000 });
+
+        let samples = compute_samples(&prev, &curr, 2.0);
+        assert_eq!(samples.len(), 3); // eth0 + eth1 + aggregate
+
+        let agg = samples.iter().find(|s| s.interface == "*").unwrap();
+        // Total dl: (2000-1000)/2 + (4000-2000)/2 = 500 + 1000 = 1500
+        assert_eq!(agg.download_bps, 1500);
+        // Total ul: (800-500)/2 + (2000-1000)/2 = 150 + 500 = 650
+        assert_eq!(agg.upload_bps, 650);
+        assert_eq!(agg.total_rx, 6000);
+        assert_eq!(agg.total_tx, 2800);
+    }
+
+    #[test]
+    fn test_compute_samples_zero_interval() {
+        let mut prev = HashMap::new();
+        prev.insert("eth0".to_string(), CounterSnapshot { rx: 1000, tx: 500 });
+        let mut curr = HashMap::new();
+        curr.insert("eth0".to_string(), CounterSnapshot { rx: 2000, tx: 800 });
+
+        let samples = compute_samples(&prev, &curr, 0.0);
+        let eth0 = samples.iter().find(|s| s.interface == "eth0").unwrap();
+        assert_eq!(eth0.download_bps, 0);
+        assert_eq!(eth0.upload_bps, 0);
+    }
+
+    #[test]
+    fn test_compute_samples_missing_interface_skipped() {
+        let prev = HashMap::new();
+        let mut curr = HashMap::new();
+        curr.insert("eth0".to_string(), CounterSnapshot { rx: 1000, tx: 500 });
+
+        let samples = compute_samples(&prev, &curr, 1.0);
+        // eth0 is not in prev, so only the aggregate entry survives
+        assert_eq!(samples.len(), 1);
+        let agg = samples.iter().find(|s| s.interface == "*").unwrap();
+        assert_eq!(agg.download_bps, 0);
+        assert_eq!(agg.upload_bps, 0);
+    }
+
+    #[test]
+    fn test_compute_samples_empty() {
+        let prev = HashMap::new();
+        let curr = HashMap::new();
+        let samples = compute_samples(&prev, &curr, 1.0);
+        // Only aggregate entry (all zeros)
+        assert_eq!(samples.len(), 1);
+        assert_eq!(samples[0].interface, "*");
+    }
+
+    #[test]
+    fn test_compute_samples_saturating_sub() {
+        // Counters can wrap around; saturating_sub prevents underflow
+        let mut prev = HashMap::new();
+        prev.insert("eth0".to_string(), CounterSnapshot {
+            rx: u64::MAX,
+            tx: u64::MAX,
+        });
+        let mut curr = HashMap::new();
+        curr.insert("eth0".to_string(), CounterSnapshot { rx: 10, tx: 5 });
+
+        let samples = compute_samples(&prev, &curr, 1.0);
+        let eth0 = samples.iter().find(|s| s.interface == "eth0").unwrap();
+        // After wrap: delta is 0 (saturating), not negative
+        assert_eq!(eth0.download_bps, 0);
+        assert_eq!(eth0.upload_bps, 0);
+    }
+
+    #[test]
+    fn test_compute_samples_multiple_interfaces() {
+        let mut prev = HashMap::new();
+        prev.insert("eth0".to_string(), CounterSnapshot { rx: 0, tx: 0 });
+        prev.insert("eth1".to_string(), CounterSnapshot { rx: 0, tx: 0 });
+        prev.insert("wlan0".to_string(), CounterSnapshot { rx: 0, tx: 0 });
+        let mut curr = HashMap::new();
+        curr.insert("eth0".to_string(), CounterSnapshot { rx: 100, tx: 10 });
+        curr.insert("eth1".to_string(), CounterSnapshot { rx: 200, tx: 20 });
+        curr.insert("wlan0".to_string(), CounterSnapshot { rx: 300, tx: 30 });
+
+        let samples = compute_samples(&prev, &curr, 1.0);
+        assert_eq!(samples.len(), 4); // 3 interfaces + aggregate
+
+        let agg = samples.iter().find(|s| s.interface == "*").unwrap();
+        assert_eq!(agg.download_bps, 600); // 100 + 200 + 300
+        assert_eq!(agg.upload_bps, 60);    // 10 + 20 + 30
+    }
+
+    // ── timestamp format in samples ──────────────────────────────────
+
+    #[test]
+    fn test_compute_samples_timestamp_format() {
+        let mut prev = HashMap::new();
+        prev.insert("eth0".to_string(), CounterSnapshot { rx: 0, tx: 0 });
+        let mut curr = HashMap::new();
+        curr.insert("eth0".to_string(), CounterSnapshot { rx: 100, tx: 50 });
+
+        let samples = compute_samples(&prev, &curr, 1.0);
+        assert!(samples[0].timestamp.contains('T')); // ISO-like format
+        assert!(!samples[0].timestamp.is_empty());
+    }
+
+    // ── CounterSnapshot ─────────────────────────────────────────────
+
+    #[test]
+    fn test_counter_snapshot_creation() {
+        let snap = CounterSnapshot { rx: 42, tx: 100 };
+        assert_eq!(snap.rx, 42);
+        assert_eq!(snap.tx, 100);
+    }
+
+    // ── Windows-specific CSV parsers ────────────────────────────────
+
+    #[cfg(windows)]
+    #[test]
+    fn test_parse_interface_csv_valid() {
+        let csv = "Node,Index,NetConnectionID,Name\n\
+                    HOST,0,Wi-Fi,Intel Wi-Fi 6\n\
+                    HOST,1,Ethernet,Realtek PCIe GbE\n";
+        let interfaces = parse_interface_csv(csv).unwrap();
+        assert_eq!(interfaces.len(), 2);
+        assert_eq!(interfaces[0].friendly_name, "Wi-Fi");
+        assert_eq!(interfaces[1].friendly_name, "Ethernet");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_parse_interface_csv_empty() {
+        let csv = "Node,Index,NetConnectionID,Name\n";
+        let interfaces = parse_interface_csv(csv).unwrap();
+        assert!(interfaces.is_empty());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_parse_interface_csv_skips_node_line() {
+        let csv = "Node,Index,NetConnectionID,Name\n\
+                    node,0,Wi-Fi,Intel\n";
+        let interfaces = parse_interface_csv(csv).unwrap();
+        assert_eq!(interfaces.len(), 0); // "node" in line triggers skip
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_parse_ip_config_csv_valid() {
+        let csv = "Node,Index,IPAddress\n\
+                    HOST,0,192.168.1.100\n\
+                    HOST,1,10.0.0.5\n";
+        let map = parse_ip_config_csv(csv);
+        assert_eq!(map.len(), 2);
+        assert_eq!(map.get("0").unwrap(), "192.168.1.100");
+        assert_eq!(map.get("1").unwrap(), "10.0.0.5");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_parse_ip_config_csv_semicolon_ip() {
+        // IPAddress can be semicolon-separated; should take first
+        let csv = "Node,Index,IPAddress\n\
+                    HOST,0,\"192.168.1.100;fe80::1\"\n";
+        let map = parse_ip_config_csv(csv);
+        assert_eq!(map.get("0").unwrap(), "192.168.1.100");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_parse_counter_csv_valid() {
+        let csv = "Node,Name,BytesReceivedPersec,BytesSentPersec\n\
+                    HOST,eth0,1000,500\n\
+                    HOST,eth1,2000,800\n";
+        let counters = parse_counter_csv(csv).unwrap();
+        assert_eq!(counters.len(), 2);
+        assert_eq!(counters["eth0"].rx, 1000);
+        assert_eq!(counters["eth0"].tx, 500);
+        assert_eq!(counters["eth1"].rx, 2000);
+        assert_eq!(counters["eth1"].tx, 800);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_parse_counter_csv_invalid_number_defaults_zero() {
+        let csv = "Node,Name,BytesReceivedPersec,BytesSentPersec\n\
+                    HOST,eth0,notanumber,500\n";
+        let counters = parse_counter_csv(csv).unwrap();
+        assert_eq!(counters["eth0"].rx, 0); // parse failed
+        assert_eq!(counters["eth0"].tx, 500);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_parse_counter_csv_empty() {
+        let csv = "Node,Name,BytesReceivedPersec,BytesSentPersec\n";
+        let counters = parse_counter_csv(csv).unwrap();
+        assert!(counters.is_empty());
+    }
+}

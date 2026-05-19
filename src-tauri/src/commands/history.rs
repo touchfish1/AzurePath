@@ -64,8 +64,6 @@ pub async fn activity_log(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn test_activity_list_defaults() {
         // Verify default parameter values

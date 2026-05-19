@@ -166,8 +166,8 @@ async fn measure_upload(
 
     match time::timeout(total_duration + Duration::from_secs(5), async {
         let mut stream = TcpStream::connect(peer_addr).await.map_err(|e| e.to_string())?;
-        // Send "UPLOAD" signal
-        stream.write_all(b"UPLOAD").await.map_err(|e| e.to_string())?;
+        // Send "UPLOAD" signal (padded to 8 bytes with nulls for consistent framing)
+        stream.write_all(b"UPLOAD\0\0").await.map_err(|e| e.to_string())?;
 
         let data = vec![0u8; CHUNK_SIZE];
         let mut total_sent = 0u64;
@@ -216,20 +216,23 @@ pub async fn run_speedtest_server(port: u16, duration_secs: u64) -> Result<(), S
         .await
         .map_err(|e| format!("bind: {}", e))?;
 
-    // Accept the first connection
-    let (mut stream, _) = listener
-        .accept()
+    // Accept the first connection with a timeout
+    let (mut stream, _) = time::timeout(Duration::from_secs(30), listener.accept())
         .await
+        .map_err(|_| "Timeout waiting for client connection".to_string())?
         .map_err(|e| format!("accept: {}", e))?;
 
-    // Read test mode
+    // Read test mode (signals are padded to 8 bytes with nulls for consistent framing)
     let mut mode_buf = [0u8; 8];
-    stream
-        .read_exact(&mut mode_buf)
+    time::timeout(Duration::from_secs(10), stream.read_exact(&mut mode_buf))
         .await
+        .map_err(|_| "Timeout reading test mode".to_string())?
         .map_err(|e| format!("read mode: {}", e))?;
 
-    let mode = std::str::from_utf8(&mode_buf).unwrap_or("");
+    // Trim null padding and compare
+    let mode = std::str::from_utf8(&mode_buf)
+        .unwrap_or("")
+        .trim_end_matches('\0');
     let data = vec![0u8; CHUNK_SIZE];
 
     match mode {
@@ -255,8 +258,10 @@ pub async fn run_speedtest_server(port: u16, duration_secs: u64) -> Result<(), S
                 if start.elapsed() >= total_duration {
                     break;
                 }
-                if stream.read(&mut buf).await.is_err() || stream.read(&mut buf).await.ok() == Some(0) {
-                    break;
+                // Read once and check for errors or EOF
+                match stream.read(&mut buf).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {} // data received, continue
                 }
             }
         }
@@ -275,6 +280,7 @@ pub async fn run_speedtest_server(port: u16, duration_secs: u64) -> Result<(), S
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::speedtest::SpeedtestProgress;
 
     #[tokio::test]
     async fn test_measure_latency_no_server() {
@@ -293,5 +299,105 @@ mod tests {
             time::timeout(Duration::from_secs(2), ping_once("127.0.0.1:65535")).await
         });
         assert!(result.is_err() || result.unwrap().is_err());
+    }
+
+    // ── Struct and constant validation ──────────────────────────────
+
+    #[test]
+    fn test_chunk_size_constant() {
+        assert_eq!(CHUNK_SIZE, 1024 * 1024); // 1 MB
+    }
+
+    #[test]
+    fn test_speedtest_result_serialization_camelcase() {
+        let result = SpeedtestResult {
+            download_mbps: 100.5,
+            upload_mbps: 50.2,
+            latency_ms: 10.0,
+            jitter_ms: 2.5,
+            peer_ip: "192.168.1.1".to_string(),
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("downloadMbps"));
+        assert!(json.contains("uploadMbps"));
+        assert!(json.contains("latencyMs"));
+        assert!(json.contains("jitterMs"));
+        assert!(json.contains("peerIp"));
+        // Deserialize back
+        let deserialized: SpeedtestResult = serde_json::from_str(&json).unwrap();
+        assert!((deserialized.download_mbps - 100.5).abs() < 1e-9);
+        assert!((deserialized.upload_mbps - 50.2).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_speedtest_progress_serialization() {
+        let progress = SpeedtestProgress {
+            phase: "download".to_string(),
+            percent: 50.0,
+            current_value: 25.0,
+        };
+        let json = serde_json::to_string(&progress).unwrap();
+        assert!(json.contains("\"phase\""));
+        assert!(json.contains("\"percent\""));
+        assert!(json.contains("\"currentValue\""));
+
+        let deserialized: SpeedtestProgress = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.phase, "download");
+        assert!((deserialized.percent - 50.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_speedtest_result_default_values() {
+        let result = SpeedtestResult {
+            download_mbps: 0.0,
+            upload_mbps: 0.0,
+            latency_ms: 0.0,
+            jitter_ms: 0.0,
+            peer_ip: "".to_string(),
+        };
+        assert_eq!(result.download_mbps, 0.0);
+        assert_eq!(result.upload_mbps, 0.0);
+        assert_eq!(result.latency_ms, 0.0);
+        assert_eq!(result.jitter_ms, 0.0);
+        assert!(result.peer_ip.is_empty());
+    }
+
+    // ── measure_latency edge cases ──────────────────────────────────
+
+    #[tokio::test]
+    async fn test_measure_latency_no_nan_values() {
+        let (latency, jitter) = measure_latency("127.0.0.1:1").await;
+        assert!(!latency.is_nan());
+        assert!(!jitter.is_nan());
+        assert!(latency.is_finite());
+        assert!(jitter.is_finite());
+    }
+
+    #[tokio::test]
+    async fn test_measure_latency_unreachable_port() {
+        // Using a very low port that should not be in use
+        let (latency, jitter) = measure_latency("127.0.0.1:0").await;
+        // Should return (0.0, 0.0) since no valid RTTs were collected
+        assert_eq!(latency, 0.0);
+        assert_eq!(jitter, 0.0);
+    }
+
+    // ── measure_download / measure_upload timeout behavior ──────────
+
+    #[tokio::test]
+    async fn test_measure_download_no_server() {
+        let calls = std::sync::atomic::AtomicU64::new(0);
+        let result = measure_download("127.0.0.1:65534", 1, |_pct, _val| {
+            calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        })
+        .await;
+        assert_eq!(result, 0.0); // No server, should return 0
+    }
+
+    #[tokio::test]
+    async fn test_measure_upload_no_server() {
+        let result = measure_upload("127.0.0.1:65533", 1, |_pct, _val| {})
+            .await;
+        assert_eq!(result, 0.0);
     }
 }

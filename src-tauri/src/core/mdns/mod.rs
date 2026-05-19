@@ -107,6 +107,36 @@ async fn bind_mdns_socket() -> Result<UdpSocket, String> {
         .into_std()
         .map_err(|e| format!("Failed to convert socket: {}", e))?;
 
+    // Join the mDNS multicast group so we receive responses.
+    // On Windows this requires the socket to be bound to 0.0.0.0
+    // and the loopback interface to be explicitly set.
+    #[cfg(windows)]
+    {
+        // Use the winsock2 API via std::net to join the multicast group.
+        // The `set_multicast_loop_v4` ensures we can receive our own packets.
+        let _ = std_socket.set_multicast_loop_v4(true);
+        // Join the 224.0.0.251 mDNS multicast group
+        if let Err(e) = std_socket.join_multicast_v4(
+            &"224.0.0.251".parse().map_err(|e| format!("Parse multicast addr: {}", e))?,
+            &"0.0.0.0".parse().map_err(|e| format!("Parse local addr: {}", e))?,
+        ) {
+            // Non-fatal: some systems may not support explicit join
+            // or the socket may already receive multicast traffic
+            eprintln!("Warning: failed to join multicast group: {}", e);
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        let _ = std_socket.set_multicast_loop_v4(true);
+        if let Err(e) = std_socket.join_multicast_v4(
+            &"224.0.0.251".parse().unwrap(),
+            &"0.0.0.0".parse().unwrap(),
+        ) {
+            eprintln!("Warning: failed to join multicast group: {}", e);
+        }
+    }
+
     // Re-wrap into tokio socket.
     let socket = UdpSocket::from_std(std_socket)
         .map_err(|e| format!("Failed to re-wrap socket: {}", e))?;
@@ -665,4 +695,410 @@ fn compress_ipv6(ip: &str) -> String {
     }
 
     joined
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── encode_dns_name ─────────────────────────────────────────────
+
+    #[test]
+    fn test_encode_dns_name_normal() {
+        let mut buf = Vec::new();
+        encode_dns_name("_http._tcp.local", &mut buf).unwrap();
+        let expected: Vec<u8> = vec![
+            5, b'_', b'h', b't', b't', b'p', 4, b'_', b't', b'c', b'p',
+            5, b'l', b'o', b'c', b'a', b'l', 0,
+        ];
+        assert_eq!(buf, expected);
+    }
+
+    #[test]
+    fn test_encode_dns_name_single_label() {
+        let mut buf = Vec::new();
+        encode_dns_name("localhost", &mut buf).unwrap();
+        assert_eq!(buf, vec![
+            9, b'l', b'o', b'c', b'a', b'l', b'h', b'o', b's', b't', 0,
+        ]);
+    }
+
+    #[test]
+    fn test_encode_dns_name_empty() {
+        let mut buf = Vec::new();
+        let result = encode_dns_name("", &mut buf);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_encode_dns_name_label_too_long() {
+        let long_label = "a".repeat(64);
+        let mut buf = Vec::new();
+        let result = encode_dns_name(&long_label, &mut buf);
+        assert!(result.is_err());
+    }
+
+    // ── decode_dns_name ─────────────────────────────────────────────
+
+    #[test]
+    fn test_decode_dns_name_normal() {
+        let data = [
+            5, b'_', b'h', b't', b't', b'p', 4, b'_', b't', b'c', b'p',
+            5, b'l', b'o', b'c', b'a', b'l', 0,
+        ];
+        let (name, end) = decode_dns_name(&data, 0).unwrap();
+        assert_eq!(name, "_http._tcp.local");
+        assert_eq!(end, data.len());
+    }
+
+    #[test]
+    fn test_decode_dns_name_with_compression() {
+        // Offset  0: "_http._tcp.local" (uncompressed)
+        // Offset 18: "www" + pointer back to offset 0
+        let mut data: Vec<u8> = vec![
+            5, b'_', b'h', b't', b't', b'p', 4, b'_', b't', b'c', b'p',
+            5, b'l', b'o', b'c', b'a', b'l', 0,
+        ];
+        // Append "www" label + pointer to offset 0
+        data.push(3);
+        data.extend_from_slice(b"www");
+        data.extend_from_slice(&[0xc0, 0x00]);
+
+        let (name, end) = decode_dns_name(&data, 18).unwrap();
+        assert_eq!(name, "www._http._tcp.local");
+        assert_eq!(end, 24); // 18 + 1 + 3 (www label) + 2 (pointer)
+    }
+
+    #[test]
+    fn test_decode_dns_name_truncated_data() {
+        let data = [5, b'_', b'h']; // incomplete label
+        assert!(decode_dns_name(&data, 0).is_none());
+    }
+
+    #[test]
+    fn test_decode_dns_name_root_only() {
+        let data = [0];
+        let (name, end) = decode_dns_name(&data, 0).unwrap();
+        assert_eq!(name, "");
+        assert_eq!(end, 1);
+    }
+
+    #[test]
+    fn test_decode_dns_name_truncated_pointer() {
+        let data = [0xc0]; // pointer only half-written
+        assert!(decode_dns_name(&data, 0).is_none());
+    }
+
+    // ── skip_dns_name ───────────────────────────────────────────────
+
+    #[test]
+    fn test_skip_dns_name_normal() {
+        let data = [5, b'_', b'h', b't', b't', b'p', 0];
+        let offset = skip_dns_name(&data, 0).unwrap();
+        assert_eq!(offset, 7);
+    }
+
+    #[test]
+    fn test_skip_dns_name_with_pointer() {
+        let data = [
+            5, b'_', b'h', b't', b't', b'p', 0,
+            0xc0, 0x00,
+        ];
+        let offset = skip_dns_name(&data, 7).unwrap();
+        assert_eq!(offset, 9);
+    }
+
+    #[test]
+    fn test_skip_dns_name_truncated() {
+        let data = [5, b'_', b'h']; // truncated label body
+        assert!(skip_dns_name(&data, 0).is_err());
+    }
+
+    // ── extract_service_type ────────────────────────────────────────
+
+    #[test]
+    fn test_extract_service_type_standard() {
+        assert_eq!(extract_service_type("_http._tcp.local"), "_http._tcp");
+    }
+
+    #[test]
+    fn test_extract_service_type_no_underscore() {
+        assert_eq!(extract_service_type("example.com"), "example.com");
+    }
+
+    #[test]
+    fn test_extract_service_type_single_underscore() {
+        assert_eq!(extract_service_type("_http.local"), "_http.local");
+    }
+
+    // ── extract_hostname_from_instance ──────────────────────────────
+
+    #[test]
+    fn test_extract_hostname_from_instance_normal() {
+        let host = extract_hostname_from_instance("My Printer._http._tcp.local");
+        assert_eq!(host, "My Printer");
+    }
+
+    #[test]
+    fn test_extract_hostname_from_instance_no_dots() {
+        assert_eq!(extract_hostname_from_instance("hostname"), "hostname");
+    }
+
+    #[test]
+    fn test_extract_hostname_from_instance_empty() {
+        assert_eq!(extract_hostname_from_instance(""), "");
+    }
+
+    // ── compress_ipv6 ───────────────────────────────────────────────
+
+    #[test]
+    fn test_compress_ipv6_long_zero_run() {
+        let r = compress_ipv6("2001:0db8:0000:0000:0000:0000:0000:0001");
+        assert_eq!(r, "2001:db8::1");
+    }
+
+    #[test]
+    fn test_compress_ipv6_no_compression() {
+        let r = compress_ipv6("2001:0db8:0001:0002:0003:0004:0005:0006");
+        assert_eq!(r, "2001:db8:1:2:3:4:5:6");
+    }
+
+    #[test]
+    fn test_compress_ipv6_leading_zeros() {
+        let r = compress_ipv6("0000:0000:0000:0000:0000:0000:0000:0001");
+        assert_eq!(r, "::1");
+    }
+
+    #[test]
+    fn test_compress_ipv6_all_zeros() {
+        let r = compress_ipv6("0000:0000:0000:0000:0000:0000:0000:0000");
+        assert_eq!(r, "::");
+    }
+
+    #[test]
+    fn test_compress_ipv6_trailing_zeros() {
+        let r = compress_ipv6("2001:0db8:0000:0000:0000:0000:0000:0000");
+        assert_eq!(r, "2001:db8::");
+    }
+
+    #[test]
+    fn test_compress_ipv6_multiple_zero_runs_longest_wins() {
+        // Run of 3 zeros (positions 4-6) is longest
+        let r = compress_ipv6("2001:0000:0000:0001:0000:0000:0000:0002");
+        assert_eq!(r, "2001:0:0:1::2");
+    }
+
+    #[test]
+    fn test_compress_ipv6_short_input() {
+        let r = compress_ipv6("::1");
+        assert_eq!(r, "::1");
+    }
+
+    #[test]
+    fn test_compress_ipv6_equal_runs_first_wins() {
+        let r = compress_ipv6("2001:0000:0000:0001:0000:0000:0002:0003");
+        assert_eq!(r, "2001::1:0:0:2:3");
+    }
+
+    // ── build_mdns_ptrs_query ───────────────────────────────────────
+
+    #[test]
+    fn test_build_mdns_ptrs_query_header() {
+        let query = build_mdns_ptrs_query("_services._dns-sd._udp.local").unwrap();
+        // Header: ID=0, Flags=0, QDCOUNT=1, AN/NS/AR=0
+        assert_eq!(query.len(), 12 + 31 + 4);
+        assert_eq!(&query[0..12], &[
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ]);
+        // QTYPE = PTR (12)
+        assert_eq!(&query[query.len() - 4..query.len() - 2], &[0x00, 0x0c]);
+        // QCLASS = IN + unicast-response (0x8001)
+        assert_eq!(&query[query.len() - 2..], &[0x80, 0x01]);
+    }
+
+    #[test]
+    fn test_build_mdns_ptrs_query_empty_target() {
+        let result = build_mdns_ptrs_query("");
+        assert!(result.is_err());
+    }
+
+    // ── build_services ──────────────────────────────────────────────
+
+    #[test]
+    fn test_build_services_basic() {
+        let ptr = vec![("_http._tcp.local".into(), "Web Server._http._tcp.local".into())];
+        let srv = vec![("Web Server._http._tcp.local".into(), "webserver.local".into(), 80)];
+        let a = vec![("webserver.local".into(), "192.168.1.100".into())];
+        let txt: Vec<(String, HashMap<String, String>)> = vec![];
+
+        let services = build_services(&ptr, &srv, &a, &txt);
+        assert_eq!(services.len(), 1);
+        assert_eq!(services[0].service_type, "_http._tcp");
+        assert_eq!(services[0].hostname, "webserver");
+        assert_eq!(services[0].ip, "192.168.1.100");
+        assert_eq!(services[0].port, 80);
+        assert!(services[0].txt.is_empty());
+    }
+
+    #[test]
+    fn test_build_services_with_txt() {
+        let ptr = vec![("_ssh._tcp.local".into(), "SSH._ssh._tcp.local".into())];
+        let srv = vec![("SSH._ssh._tcp.local".into(), "sshhost.local".into(), 22)];
+        let a = vec![("sshhost.local".into(), "10.0.0.5".into())];
+        let mut kv = HashMap::new();
+        kv.insert("version".into(), "8.9".into());
+        let txt = vec![("SSH._ssh._tcp.local".into(), kv)];
+
+        let services = build_services(&ptr, &srv, &a, &txt);
+        assert_eq!(services[0].txt.get("version").unwrap(), "8.9");
+    }
+
+    #[test]
+    fn test_build_services_no_srv() {
+        let ptr = vec![("_http._tcp.local".into(), "My Server._http._tcp.local".into())];
+        let services = build_services(&ptr, &[], &[], &[]);
+        assert_eq!(services[0].hostname, "My Server._http._tcp");
+        assert_eq!(services[0].port, 0);
+        assert!(services[0].ip.is_empty());
+    }
+
+    #[test]
+    fn test_build_services_dedup() {
+        let ptr = vec![
+            ("_http._tcp.local".into(), "Srv1._http._tcp.local".into()),
+            ("_http._tcp.local".into(), "Srv1._http._tcp.local".into()),
+        ];
+        let srv = vec![("Srv1._http._tcp.local".into(), "h.local".into(), 80)];
+        let a = vec![("h.local".into(), "10.0.0.1".into())];
+        let services = build_services(&ptr, &srv, &a, &[]);
+        assert_eq!(services.len(), 1);
+    }
+
+    #[test]
+    fn test_build_services_multiple_types() {
+        let ptr = vec![
+            ("_http._tcp.local".into(), "Web._http._tcp.local".into()),
+            ("_ssh._tcp.local".into(), "SSH._ssh._tcp.local".into()),
+        ];
+        let srv = vec![
+            ("Web._http._tcp.local".into(), "web.local".into(), 80),
+            ("SSH._ssh._tcp.local".into(), "ssh.local".into(), 22),
+        ];
+        let a = vec![
+            ("web.local".into(), "10.0.0.1".into()),
+            ("ssh.local".into(), "10.0.0.2".into()),
+        ];
+        let services = build_services(&ptr, &srv, &a, &[]);
+        assert_eq!(services.len(), 2);
+    }
+
+    // ── extract_service_types ───────────────────────────────────────
+
+    #[test]
+    fn test_extract_service_types_empty() {
+        let types = extract_service_types(&[]);
+        assert!(types.is_empty());
+    }
+
+    #[test]
+    fn test_extract_service_types_short_packet() {
+        let types = extract_service_types(&[vec![0u8; 5]]);
+        assert!(types.is_empty());
+    }
+
+    #[test]
+    fn test_extract_service_types_valid_response() {
+        // Construct a DNS response with 1 PTR record:
+        //   Owner: _services._dns-sd._udp.local
+        //   RDATA: _http._tcp.local
+        let mut packet = Vec::new();
+
+        // Header: ID=0, flags=response, QDCOUNT=0, ANCOUNT=1, NS=0, AR=0
+        packet.extend_from_slice(&[0x00, 0x00, 0x84, 0x00]);
+        packet.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]);
+        packet.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]);
+
+        // Owner name: _services._dns-sd._udp.local (31 bytes)
+        packet.push(10);
+        packet.extend_from_slice(b"_services");
+        packet.push(7);
+        packet.extend_from_slice(b"_dns-sd");
+        packet.push(4);
+        packet.extend_from_slice(b"_udp");
+        packet.push(5);
+        packet.extend_from_slice(b"local");
+        packet.push(0);
+
+        // TYPE = PTR (12)
+        packet.extend_from_slice(&12u16.to_be_bytes());
+        // CLASS = IN (1)
+        packet.extend_from_slice(&1u16.to_be_bytes());
+        // TTL = 4500
+        packet.extend_from_slice(&4500u32.to_be_bytes());
+
+        // RDATA: _http._tcp.local (18 bytes)
+        let rdata: Vec<u8> = vec![
+            5, b'_', b'h', b't', b't', b'p',
+            4, b'_', b't', b'c', b'p',
+            5, b'l', b'o', b'c', b'a', b'l',
+            0,
+        ];
+        packet.extend_from_slice(&(rdata.len() as u16).to_be_bytes());
+        packet.extend_from_slice(&rdata);
+
+        let types = extract_service_types(&[packet]);
+        assert_eq!(types, vec!["_http._tcp"]);
+    }
+
+    // ── parse_all_services integration ──────────────────────────────
+
+    #[test]
+    fn test_parse_all_services_ptr_and_a_records() {
+        let mut packet = Vec::new();
+
+        // Header: ANCOUNT=2 (PTR + A)
+        packet.extend_from_slice(&[0x00, 0x00, 0x84, 0x00]);
+        packet.extend_from_slice(&[0x00, 0x00, 0x00, 0x02]);
+        packet.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]);
+
+        // Answer 1: PTR _http._tcp.local -> Web Server._http._tcp.local
+        let ptr_owner: Vec<u8> = vec![
+            5, b'_', b'h', b't', b't', b'p',
+            4, b'_', b't', b'c', b'p',
+            5, b'l', b'o', b'c', b'a', b'l', 0,
+        ];
+        packet.extend_from_slice(&ptr_owner);
+
+        let ptr_rdata: Vec<u8> = vec![
+            10, b'W', b'e', b'b', b' ', b'S', b'e', b'r', b'v', b'e', b'r',
+            5, b'_', b'h', b't', b't', b'p',
+            4, b'_', b't', b'c', b'p',
+            5, b'l', b'o', b'c', b'a', b'l', 0,
+        ];
+        packet.extend_from_slice(&12u16.to_be_bytes()); // TYPE_PTR
+        packet.extend_from_slice(&1u16.to_be_bytes()); // CLASS_IN
+        packet.extend_from_slice(&4500u32.to_be_bytes()); // TTL
+        packet.extend_from_slice(&(ptr_rdata.len() as u16).to_be_bytes());
+        packet.extend_from_slice(&ptr_rdata);
+
+        // Answer 2: A record mapping "Web Server._http._tcp.local" -> IP
+        packet.extend_from_slice(&ptr_rdata); // owner = same as PTR RDATA
+
+        packet.extend_from_slice(&1u16.to_be_bytes()); // TYPE_A
+        packet.extend_from_slice(&1u16.to_be_bytes()); // CLASS_IN
+        packet.extend_from_slice(&120u32.to_be_bytes()); // TTL
+        packet.extend_from_slice(&4u16.to_be_bytes()); // RDLENGTH
+        packet.extend_from_slice(&[192, 168, 1, 100]); // IP
+
+        let services = parse_all_services(&[packet]);
+        assert_eq!(services.len(), 1);
+        assert_eq!(services[0].service_type, "_http._tcp");
+        // Without SRV, port defaults to 0
+        assert_eq!(services[0].port, 0);
+        // With A record, IP should be resolved via the with_local lookup
+        // The hostname is "Web Server._http._tcp" (trimmed .local from instance)
+        // with_local = "Web Server._http._tcp.local" matches A record owner
+        assert_eq!(services[0].ip, "192.168.1.100");
+    }
 }
