@@ -1,13 +1,99 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted } from "vue";
+import { onMounted, onUnmounted, watch, ref, nextTick } from "vue";
 import { Play, Square, Route, Copy } from "lucide-vue-next";
 import Button from "@/components/ui/button/Button.vue";
 import { useTracerouteStore } from "@/stores/traceroute";
 import { useToastStore } from "@/stores/toast";
+import { useTargetGroupStore } from "@/stores/targetGroup";
+import TargetGroupPicker from "@/components/target-group/TargetGroupPicker.vue";
+import type { TargetGroup } from "@/lib/tauri";
 
 const toast = useToastStore();
 
 const store = useTracerouteStore();
+
+// ─── Target group support ─────────────────────────────────────────
+const targetGroupStore = useTargetGroupStore();
+const selectedGroupId = ref<string | null>(null);
+const selectedGroup = ref<TargetGroup | null>(null);
+const checkedTargets = ref<Set<string>>(new Set());
+const batchRunning = ref(false);
+const currentBatchIdx = ref(-1);
+
+watch(selectedGroupId, async (id) => {
+  if (id) {
+    await targetGroupStore.loadGroups();
+    selectedGroup.value = targetGroupStore.groups.find((g) => g.id === id) || null;
+    if (selectedGroup.value) {
+      checkedTargets.value = new Set(selectedGroup.value.targets);
+    }
+  } else {
+    selectedGroup.value = null;
+    checkedTargets.value = new Set();
+  }
+});
+
+function toggleTarget(target: string) {
+  const next = new Set(checkedTargets.value);
+  if (next.has(target)) {
+    next.delete(target);
+  } else {
+    next.add(target);
+  }
+  checkedTargets.value = next;
+}
+
+function waitForTraceIdle(): Promise<void> {
+  return new Promise((resolve) => {
+    if (!store.running) {
+      resolve();
+      return;
+    }
+    const stop = watch(
+      () => store.running,
+      (val) => {
+        if (!val) {
+          stop();
+          resolve();
+        }
+      },
+    );
+  });
+}
+
+async function startBatch() {
+  const targets = Array.from(checkedTargets.value);
+  if (targets.length === 0) return;
+
+  batchRunning.value = true;
+  store.reset();
+
+  for (let i = 0; i < targets.length; i++) {
+    if (!batchRunning.value) break;
+    currentBatchIdx.value = i;
+    store.target = targets[i];
+
+    await store.start();
+    await nextTick();
+    await waitForTraceIdle();
+  }
+
+  batchRunning.value = false;
+  currentBatchIdx.value = -1;
+}
+
+function handleStart() {
+  if (selectedGroup.value && checkedTargets.value.size > 0) {
+    startBatch();
+  } else {
+    store.start();
+  }
+}
+
+function handleStop() {
+  batchRunning.value = false;
+  store.stop();
+}
 
 function formatLatency(ms: number | null): string {
   if (ms === null) return "*";
@@ -31,6 +117,7 @@ onMounted(async () => {
   if (store.currentTaskId) {
     await store.attachListeners();
   }
+  await targetGroupStore.loadGroups();
 });
 
 onUnmounted(() => {
@@ -48,13 +135,18 @@ onUnmounted(() => {
 
     <!-- Input card -->
     <div class="noise-bg rounded-xl border border-paper-deep/60 bg-paper p-5 shadow-sm">
+      <!-- Target group picker -->
+      <div class="mb-3">
+        <TargetGroupPicker v-model="selectedGroupId" />
+      </div>
+
       <div class="flex flex-wrap items-end gap-3">
         <div class="flex-1 min-w-[180px]">
           <label class="mb-1 block text-xs font-medium text-ink-soft">目标地址</label>
           <input
             v-model="store.target"
             placeholder="IP 地址或域名"
-            :disabled="store.running"
+            :disabled="store.running || batchRunning"
             class="w-full rounded-lg border border-paper-deep bg-paper-warm/50 px-3 py-2 text-sm text-ink placeholder:text-ink-faint/50 outline-none transition-colors focus:border-bamboo/50 focus:ring-1 focus:ring-bamboo/20 disabled:opacity-50"
           />
         </div>
@@ -65,7 +157,7 @@ onUnmounted(() => {
             type="number"
             min="1"
             max="64"
-            :disabled="store.running"
+            :disabled="store.running || batchRunning"
             class="w-full rounded-lg border border-paper-deep bg-paper-warm/50 px-3 py-2 text-sm text-ink outline-none transition-colors focus:border-bamboo/50 focus:ring-1 focus:ring-bamboo/20 disabled:opacity-50"
           />
         </div>
@@ -77,21 +169,95 @@ onUnmounted(() => {
             min="100"
             max="30000"
             step="100"
-            :disabled="store.running"
+            :disabled="store.running || batchRunning"
             class="w-full rounded-lg border border-paper-deep bg-paper-warm/50 px-3 py-2 text-sm text-ink outline-none transition-colors focus:border-bamboo/50 focus:ring-1 focus:ring-bamboo/20 disabled:opacity-50"
           />
         </div>
         <div class="flex gap-2">
-          <Button :disabled="store.running" @click="store.start">
+          <Button :disabled="store.running || batchRunning" @click="handleStart">
             <Play class="mr-1.5 h-3.5 w-3.5" />
-            开始
+            <template v-if="batchRunning">
+              批量中 ({{ currentBatchIdx + 1 }}/{{ checkedTargets.size }})
+            </template>
+            <template v-else-if="selectedGroup && checkedTargets.size > 0">
+              开始批量 ({{ checkedTargets.size }}个)
+            </template>
+            <template v-else>
+              开始
+            </template>
           </Button>
-          <Button variant="danger" :disabled="!store.running" @click="store.stop">
+          <Button variant="danger" :disabled="!store.running && !batchRunning" @click="handleStop">
             <Square class="mr-1.5 h-3.5 w-3.5" />
             停止
           </Button>
         </div>
       </div>
+
+      <!-- Batch target checkboxes -->
+      <div
+        v-if="selectedGroup && selectedGroup.targets.length > 0"
+        class="mt-3 border-t border-paper-deep/30 pt-3"
+      >
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-xs font-medium text-ink-soft">
+            分组目标 ({{ checkedTargets.size }}/{{ selectedGroup.targets.length }})
+          </span>
+          <div class="flex gap-2">
+            <button
+              class="text-xs text-bamboo hover:text-bamboo-light transition-colors"
+              @click="checkedTargets = new Set(selectedGroup.targets)"
+            >
+              全选
+            </button>
+            <button
+              class="text-xs text-ink-faint hover:text-ink-soft transition-colors"
+              @click="checkedTargets = new Set()"
+            >
+              取消
+            </button>
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-1.5">
+          <label
+            v-for="target in selectedGroup.targets"
+            :key="target"
+            class="inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-mono transition-colors"
+            :class="
+              checkedTargets.has(target)
+                ? 'border-bamboo/40 bg-bamboo/5 text-bamboo'
+                : 'border-paper-deep/40 text-ink-soft hover:border-paper-deep/70'
+            "
+          >
+            <input
+              type="checkbox"
+              :checked="checkedTargets.has(target)"
+              :disabled="batchRunning"
+              class="sr-only"
+              @change="toggleTarget(target)"
+            />
+            <span
+              class="flex h-3 w-3 shrink-0 items-center justify-center rounded border transition-colors"
+              :class="
+                checkedTargets.has(target)
+                  ? 'border-bamboo bg-bamboo text-white'
+                  : 'border-paper-deep'
+              "
+            >
+              <span v-if="checkedTargets.has(target)" class="text-[8px]">&#10003;</span>
+            </span>
+            {{ target }}
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- Batch progress -->
+    <div
+      v-if="batchRunning"
+      class="rounded-xl border border-bamboo/20 bg-bamboo/5 px-4 py-3 text-sm text-bamboo"
+    >
+      批量追踪中：{{ currentBatchIdx + 1 }} / {{ checkedTargets.size }}
+      （当前：{{ Array.from(checkedTargets)[currentBatchIdx] || "---" }}）
     </div>
 
     <!-- Error banner -->
@@ -164,7 +330,7 @@ onUnmounted(() => {
 
     <!-- Empty state guide -->
     <div
-      v-else-if="!store.running && !store.error"
+      v-else-if="!store.running && !batchRunning && !store.error"
       class="flex items-center justify-center rounded-xl border border-dashed border-paper-deep/30 bg-paper-warm/20 py-16 text-sm text-ink-faint"
     >
       <div class="text-center max-w-sm">

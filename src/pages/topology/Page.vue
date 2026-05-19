@@ -5,7 +5,14 @@ import {
   discoveryPeers,
   onPeerList,
   onPeerOffline,
+  discoverTopology,
+  cancelTopologyDiscovery,
+  onTopologyProgress,
+  onTopologyResult,
+  onTopologyError,
   type PeerInfo,
+  type DiscoverProgress,
+  type TopologyResult,
 } from "@/lib/tauri";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
@@ -33,6 +40,16 @@ let unlistenPeerOffline: UnlistenFn | null = null;
 let animFrameId: number | null = null;
 let canvasWidth = 800;
 let canvasHeight = 600;
+
+// ============= Auto Discovery State =============
+const subnet = ref("192.168.1.0/24");
+const discovering = ref(false);
+const showDiscoveryPanel = ref(false);
+const discoverProgress = ref<DiscoverProgress | null>(null);
+const discoveredLinks = ref<{ source: string; target: string; latencyMs: number | null }[]>([]);
+let unlistenDiscoverProgress: UnlistenFn | null = null;
+let unlistenDiscoverResult: UnlistenFn | null = null;
+let unlistenDiscoverError: UnlistenFn | null = null;
 
 // ============= Force-directed Layout =============
 function initNodes() {
@@ -160,10 +177,37 @@ function draw() {
     }
   }
 
+  // Draw discovered links (ping-detected connections)
+  ctx.save();
+  ctx.strokeStyle = "rgba(59, 130, 246, 0.35)";
+  ctx.lineWidth = 2;
+  ctx.setLineDash([4, 4]);
+  for (const link of discoveredLinks.value) {
+    const a = nodeMap.get(link.source);
+    const b = nodeMap.get(link.target);
+    if (a && b) {
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+      // Latency label at midpoint
+      if (link.latencyMs !== null) {
+        const mx = (a.x + b.x) / 2;
+        const my = (a.y + b.y) / 2;
+        ctx.fillStyle = colors.textFaint;
+        ctx.font = "8px monospace";
+        ctx.textAlign = "center";
+        ctx.fillText(`${link.latencyMs.toFixed(1)}ms`, mx, my - 8);
+      }
+    }
+  }
+  ctx.restore();
+
   // Draw nodes
   for (const node of nodes.value) {
     const { x, y } = node;
     const isSelected = selectedPeer.value?.ip === node.peer.ip;
+    const isDiscovered = node.peer.os === "__discovered__";
 
     // Outer glow for selected
     if (isSelected) {
@@ -176,8 +220,17 @@ function draw() {
     // Main circle
     ctx.beginPath();
     ctx.arc(x, y, 22, 0, Math.PI * 2);
-    ctx.fillStyle = isSelected ? "#22c55e" : colors.nodeFill;
+    ctx.fillStyle = isSelected ? "#22c55e" : isDiscovered ? "#3b82f6" : colors.nodeFill;
     ctx.fill();
+
+    // Border for discovered nodes
+    if (isDiscovered && !isSelected) {
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.3)";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([3, 3]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
 
     // Inner highlight
     ctx.beginPath();
@@ -194,11 +247,12 @@ function draw() {
     const label = node.peer.hostname || node.peer.ip;
     ctx.fillText(label.length > 14 ? label.slice(0, 14) + "..." : label, x, y + 38);
 
-    // OS label
+    // OS / type label
     if (node.peer.os) {
       ctx.fillStyle = colors.inkSoft + "99";
       ctx.font = "8px sans-serif";
-      ctx.fillText(node.peer.os, x, y + 50);
+      const osLabel = isDiscovered ? "Ping 发现" : node.peer.os;
+      ctx.fillText(osLabel, x, y + 50);
     }
   }
 
@@ -305,9 +359,63 @@ function handlePeerOffline(payload: { id: string }) {
   }
 }
 
+// ============= Auto Discovery =============
+async function startDiscovery() {
+  discovering.value = true;
+  discoverProgress.value = null;
+  discoveredLinks.value = [];
+  try {
+    await discoverTopology(subnet.value);
+  } catch {
+    discovering.value = false;
+  }
+}
+
+function cancelDiscovery() {
+  cancelTopologyDiscovery();
+}
+
+function handleDiscoverProgress(payload: DiscoverProgress) {
+  discoverProgress.value = payload;
+  if (payload.phase === "complete") {
+    discovering.value = false;
+  }
+}
+
+function handleDiscoverResult(payload: TopologyResult) {
+  discovering.value = false;
+  discoveredLinks.value = payload.links;
+
+  // Convert discovered nodes to PeerInfo-like objects and merge into peers
+  const existingIps = new Set(peers.value.map((p) => p.ip));
+  for (const node of payload.nodes) {
+    if (!existingIps.has(node.ip)) {
+      peers.value.push({
+        id: `discovered-${node.ip}`,
+        hostname: node.hostname || node.ip,
+        ip: node.ip,
+        os: "__discovered__",
+        listen_port: 0,
+        last_seen: new Date().toISOString(),
+        status: "online",
+      });
+      existingIps.add(node.ip);
+    }
+  }
+
+  initNodes();
+}
+
+function handleDiscoverError() {
+  discovering.value = false;
+}
+
 onMounted(async () => {
   unlistenPeerList = await onPeerList(handlePeerList);
   unlistenPeerOffline = await onPeerOffline(handlePeerOffline);
+  unlistenDiscoverProgress = await onTopologyProgress(handleDiscoverProgress);
+  unlistenDiscoverResult = await onTopologyResult(handleDiscoverResult);
+  unlistenDiscoverError = await onTopologyError(handleDiscoverError);
   await loadPeers();
 
   // Start animation loop
@@ -318,6 +426,9 @@ onMounted(async () => {
 onUnmounted(() => {
   unlistenPeerList?.();
   unlistenPeerOffline?.();
+  unlistenDiscoverProgress?.();
+  unlistenDiscoverResult?.();
+  unlistenDiscoverError?.();
   if (animFrameId !== null) cancelAnimationFrame(animFrameId);
 });
 </script>
@@ -326,8 +437,77 @@ onUnmounted(() => {
   <div class="flex h-full flex-col animate-view-fade">
     <!-- Header -->
     <div class="shrink-0 px-6 pt-6 pb-4">
-      <h1 class="text-2xl font-display font-bold text-ink">网络拓扑</h1>
-      <p class="mt-0.5 text-sm text-ink-faint">可视化局域网发现设备</p>
+      <div class="flex items-center justify-between">
+        <div>
+          <h1 class="text-2xl font-display font-bold text-ink">网络拓扑</h1>
+          <p class="mt-0.5 text-sm text-ink-faint">可视化局域网发现设备</p>
+        </div>
+        <button
+          class="rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
+          :class="showDiscoveryPanel ? 'bg-paper-deep text-ink' : 'bg-bamboo/10 text-bamboo hover:bg-bamboo/15'"
+          @click="showDiscoveryPanel = !showDiscoveryPanel"
+        >
+          {{ showDiscoveryPanel ? '关闭面板' : '自动发现' }}
+        </button>
+      </div>
+
+      <!-- Auto Discovery Panel -->
+      <div
+        v-if="showDiscoveryPanel"
+        class="mt-4 rounded-xl border border-paper-deep/60 bg-paper/90 p-4 shadow-sm backdrop-blur"
+      >
+        <div class="flex items-end gap-3">
+          <div class="flex-1">
+            <label class="mb-1 block text-xs text-ink-faint">子网 (CIDR)</label>
+            <input
+              v-model="subnet"
+              type="text"
+              class="w-full rounded-lg border border-paper-deep/60 bg-paper-deep/50 px-3 py-1.5 text-xs font-mono text-ink outline-none transition-colors focus:border-bamboo/50"
+              placeholder="192.168.1.0/24"
+              :disabled="discovering"
+            />
+          </div>
+          <button
+            v-if="!discovering"
+            class="rounded-lg bg-bamboo px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-bamboo/90 disabled:opacity-50"
+            @click="startDiscovery"
+          >
+            开始发现
+          </button>
+          <button
+            v-else
+            class="rounded-lg bg-red-500 px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-red-600"
+            @click="cancelDiscovery"
+          >
+            取消
+          </button>
+        </div>
+
+        <!-- Progress -->
+        <div v-if="discovering || discoverProgress" class="mt-3">
+          <div class="flex items-center justify-between text-xs text-ink-faint">
+            <span>{{ discoverProgress?.message || '准备中...' }}</span>
+            <span>{{ discoverProgress ? discoverProgress.progress.toFixed(0) : '0' }}%</span>
+          </div>
+          <div class="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-paper-deep">
+            <div
+              class="h-full rounded-full bg-bamboo transition-all duration-300 ease-out"
+              :style="{ width: (discoverProgress?.progress || 0) + '%' }"
+            />
+          </div>
+          <div class="mt-1 text-xs text-ink-faint">
+            <template v-if="discoverProgress?.phase === 'scan'">
+              扫描主机中，已发现 {{ discoverProgress.nodesFound }} 个节点
+            </template>
+            <template v-else-if="discoverProgress?.phase === 'trace'">
+              测量延迟中，{{ discoverProgress.currentIp }}
+            </template>
+            <template v-else-if="discoverProgress?.phase === 'complete'">
+              发现完成！
+            </template>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Canvas -->
@@ -420,8 +600,8 @@ onUnmounted(() => {
             <span class="text-xs text-ink">{{ detailPopup.peer.hostname }}</span>
           </div>
           <div v-if="detailPopup.peer.os" class="flex justify-between">
-            <span class="text-xs text-ink-faint">操作系统</span>
-            <span class="text-xs text-ink">{{ detailPopup.peer.os }}</span>
+            <span class="text-xs text-ink-faint">{{ detailPopup.peer.os === '__discovered__' ? '发现方式' : '操作系统' }}</span>
+            <span class="text-xs text-ink">{{ detailPopup.peer.os === '__discovered__' ? 'Ping 扫描' : detailPopup.peer.os }}</span>
           </div>
           <div class="flex justify-between">
             <span class="text-xs text-ink-faint">状态</span>
@@ -456,8 +636,16 @@ onUnmounted(() => {
           设备节点
         </span>
         <span class="flex items-center gap-1.5">
+          <span class="inline-block h-2.5 w-2.5 rounded-full bg-blue-500" />
+          自动发现节点
+        </span>
+        <span class="flex items-center gap-1.5">
           <span class="inline-block h-px w-6 bg-slate-400/20" />
           同子网连接
+        </span>
+        <span class="flex items-center gap-1.5">
+          <span class="inline-block h-0.5 w-6 border-t-2 border-dashed border-blue-400/40" />
+          发现连接
         </span>
         <span class="flex items-center gap-1.5">
           <span class="inline-block h-2.5 w-2.5 rounded-full bg-green-500" />

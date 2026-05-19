@@ -8,6 +8,7 @@ import Sidebar from "./Sidebar.vue";
 import UpdateBanner from "@/components/UpdateBanner.vue";
 import Toast from "@/components/Toast.vue";
 import SetupWizard from "@/components/SetupWizard.vue";
+import ErrorBoundary from "@/components/ErrorBoundary.vue";
 
 const themeStore = useThemeStore();
 const settingsStore = useSettingsStore();
@@ -66,7 +67,9 @@ function onWizardCompleted() {
       <main
         class="flex-1 overflow-y-auto bg-paper noise-bg"
       >
-        <router-view />
+        <ErrorBoundary>
+          <router-view />
+        </ErrorBoundary>
       </main>
     </div>
 

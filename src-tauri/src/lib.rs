@@ -2,6 +2,7 @@ mod commands;
 mod core;
 mod types;
 
+pub use core::log_buffer::LogLayer;
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -102,6 +103,8 @@ pub fn run() {
             commands::ping::ping_stop,
             commands::traceroute::traceroute_start,
             commands::traceroute::traceroute_stop,
+            commands::topology::discover_topology,
+            commands::topology::cancel_topology_discovery,
             commands::port_scan::port_scan_start,
             commands::port_scan::port_scan_stop,
             commands::dns::dns_lookup,
@@ -188,6 +191,24 @@ pub fn run() {
             commands::bandwidth::stop_bandwidth_monitor,
             // Phase 16 — Report Export
             commands::report::save_report,
+            // Phase 17 — Logs
+            commands::logs::get_logs,
+            commands::logs::clear_logs,
+            // Phase 19 — API Test
+            commands::api_test::send_api_request,
+            commands::api_test::list_api_requests,
+            commands::api_test::save_api_request,
+            commands::api_test::delete_api_request,
+            // Phase 18 — Backup & Restore
+            commands::backup::backup_all_data,
+            commands::backup::list_backups,
+            commands::backup::restore_backup,
+            commands::backup::delete_backup,
+            // Phase 19 — Target Group Management
+            commands::target_group::list_target_groups,
+            commands::target_group::get_target_group,
+            commands::target_group::save_target_group,
+            commands::target_group::delete_target_group,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -88,9 +88,29 @@ const routes: RouteRecordRaw[] = [
     component: () => import("@/pages/bandwidth/Page.vue"),
   },
   {
+    path: "/api-test",
+    name: "api-test",
+    component: () => import("@/pages/api-test/Page.vue"),
+  },
+  {
+    path: "/target-groups",
+    name: "target-groups",
+    component: () => import("@/pages/target-groups/Page.vue"),
+  },
+  {
     path: "/settings",
     name: "settings",
     component: () => import("@/pages/settings/Page.vue"),
+  },
+  {
+    path: "/logs",
+    name: "logs",
+    component: () => import("@/pages/logs/Page.vue"),
+  },
+  {
+    path: "/backup",
+    name: "backup",
+    component: () => import("@/pages/backup/Page.vue"),
   },
 ];
 

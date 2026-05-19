@@ -822,3 +822,207 @@ export function onBandwidthData(cb: (payload: BandwidthSample[]) => void): Promi
 export function onBandwidthError(cb: (payload: { error: string }) => void): Promise<UnlistenFn> {
   return listen<{ error: string }>("bandwidth:error", (event) => cb(event.payload));
 }
+
+// ============================================================
+// Log Viewer
+// ============================================================
+
+export interface LogEntry {
+  timestamp: string;
+  level: string;
+  target: string;
+  message: string;
+}
+
+export async function getLogs(count?: number): Promise<LogEntry[]> {
+  return invoke("get_logs", { count });
+}
+
+export async function clearLogs(): Promise<void> {
+  return invoke("clear_logs");
+}
+
+// ============================================================
+// Backup & Restore
+// ============================================================
+
+export interface BackupInfo {
+  name: string;
+  size: number;
+  created: string | null;
+  path: string;
+}
+
+export async function backupAllData(): Promise<string> {
+  return invoke("backup_all_data");
+}
+
+export async function listBackups(): Promise<BackupInfo[]> {
+  return invoke("list_backups");
+}
+
+export async function restoreBackup(path: string): Promise<string> {
+  return invoke("restore_backup", { path });
+}
+
+export async function deleteBackup(path: string): Promise<void> {
+  return invoke("delete_backup", { path });
+}
+
+// ============================================================
+// Topology Auto Discovery
+// ============================================================
+
+export interface DiscoveredNode {
+  ip: string;
+  hostname: string | null;
+  latencyMs: number | null;
+  isGateway: boolean;
+}
+
+export interface DiscoveredLink {
+  source: string;
+  target: string;
+  hopCount: number;
+  latencyMs: number | null;
+}
+
+export interface TopologyResult {
+  nodes: DiscoveredNode[];
+  links: DiscoveredLink[];
+}
+
+export interface DiscoverProgress {
+  phase: string;
+  progress: number;
+  currentIp: string;
+  nodesFound: number;
+  message: string;
+}
+
+/**
+ * Start automatic network topology discovery.
+ * Scans the specified subnet (CIDR) and discovers alive hosts, gateway, and links.
+ */
+export function discoverTopology(subnet?: string): Promise<void> {
+  return invoke("discover_topology", {
+    ...(subnet !== undefined ? { subnet } : {}),
+  });
+}
+
+/**
+ * Cancel a running topology discovery.
+ */
+export function cancelTopologyDiscovery(): Promise<void> {
+  return invoke("cancel_topology_discovery");
+}
+
+/**
+ * Listen for topology discovery progress updates.
+ */
+export function onTopologyProgress(
+  cb: (payload: DiscoverProgress) => void,
+): Promise<UnlistenFn> {
+  return listen<DiscoverProgress>("topology:progress", (event) =>
+    cb(event.payload),
+  );
+}
+
+/**
+ * Listen for topology discovery completion with final results.
+ */
+export function onTopologyResult(
+  cb: (payload: TopologyResult) => void,
+): Promise<UnlistenFn> {
+  return listen<TopologyResult>("topology:result", (event) =>
+    cb(event.payload),
+  );
+}
+
+/**
+ * Listen for topology discovery errors.
+ */
+export function onTopologyError(
+  cb: (payload: { error: string }) => void,
+): Promise<UnlistenFn> {
+  return listen<{ error: string }>("topology:error", (event) =>
+    cb(event.payload),
+  );
+}
+
+// ============================================================
+// API Test Tool
+// ============================================================
+
+export interface ApiRequest {
+  method: string;
+  url: string;
+  headers: string[][];
+  body: string | null;
+  bodyType: string | null;
+}
+
+export interface ApiResponse {
+  status: number;
+  statusText: string;
+  headers: string[][];
+  body: string;
+  durationMs: number;
+  bodySize: number;
+}
+
+export interface SavedRequest {
+  id: string;
+  name: string;
+  request: ApiRequest;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export function sendApiRequest(request: ApiRequest): Promise<ApiResponse> {
+  return invoke("send_api_request", { request });
+}
+
+export function listApiRequests(): Promise<SavedRequest[]> {
+  return invoke("list_api_requests");
+}
+
+export function saveApiRequest(id: string | null, name: string, request: ApiRequest): Promise<SavedRequest> {
+  return invoke("save_api_request", { id, name, request });
+}
+
+export function deleteApiRequest(id: string): Promise<void> {
+  return invoke("delete_api_request", { id });
+}
+
+// ============================================================
+// Target Group Management
+// ============================================================
+
+export interface TargetGroup {
+  id: string;
+  name: string;
+  targets: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export function listTargetGroups(): Promise<TargetGroup[]> {
+  return invoke<TargetGroup[]>("list_target_groups");
+}
+
+export function getTargetGroup(id: string): Promise<TargetGroup | null> {
+  return invoke<TargetGroup | null>("get_target_group", { id });
+}
+
+export function saveTargetGroup(
+  id: string | null,
+  name: string,
+  targets: string[],
+): Promise<TargetGroup> {
+  return invoke<TargetGroup>("save_target_group", { id, name, targets });
+}
+
+export function deleteTargetGroup(id: string): Promise<void> {
+  return invoke<void>("delete_target_group", { id });
+}

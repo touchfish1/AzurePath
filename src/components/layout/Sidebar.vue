@@ -20,6 +20,10 @@ import {
   Settings,
   ChevronsLeft,
   ChevronsRight,
+  ScrollText,
+  HardDrive,
+  Terminal,
+  Layers,
 } from "lucide-vue-next";
 
 defineProps<{
@@ -45,10 +49,12 @@ const navItems: NavItem[] = [
   { label: "Traceroute", name: "traceroute", path: "/traceroute", icon: Route },
   { label: "端口扫描", name: "port-scan", path: "/port-scan", icon: Scan },
   { label: "DNS 查询", name: "dns", path: "/dns", icon: Globe },
+  { label: "目标分组", name: "target-groups", path: "/target-groups", icon: Layers },
   { label: "历史记录", name: "history", path: "/history", icon: History },
   { label: "消息", name: "chat", path: "/chat", icon: MessageSquare },
   { label: "剪贴板", name: "clipboard", path: "/clipboard", icon: Clipboard },
   { label: "网络嗅探", name: "network-sniffer", path: "/network-sniffer", icon: Wifi },
+  { label: "API 测试", name: "api-test", path: "/api-test", icon: Terminal },
   { label: "mDNS 发现", name: "mdns", path: "/mdns", icon: Search },
   { label: "带宽监控", name: "bandwidth", path: "/bandwidth", icon: Gauge },
   { label: "性能监控", name: "monitor", path: "/monitor", icon: Activity },
@@ -57,6 +63,8 @@ const navItems: NavItem[] = [
   { label: "文件传输", name: "files", path: "/files", icon: FileUp },
   { label: "工具箱", name: "toolbox", path: "/toolbox", icon: Wrench },
   { label: "WOL 唤醒", name: "wol", path: "/wol", icon: Magnet },
+  { label: "应用日志", name: "logs", path: "/logs", icon: ScrollText },
+  { label: "数据备份", name: "backup", path: "/backup", icon: HardDrive },
   { label: "设置", name: "settings", path: "/settings", icon: Settings },
 ];
 

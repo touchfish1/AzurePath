@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from "vue";
+import { ref, onMounted, onUnmounted, computed, watch } from "vue";
 import { useVirtualList, useDebounceFn } from "@vueuse/core";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { Search, Trash2, Star, Copy, FileText, Image, File, X, ArrowUp, ArrowDown, Download, CheckSquare, Square } from "lucide-vue-next";
