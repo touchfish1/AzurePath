@@ -49,7 +49,8 @@ const routes: RouteRecordRaw[] = [
   },
   {
     path: "/files",
-    redirect: "/chat",
+    name: "files",
+    component: () => import("@/pages/files/Page.vue"),
   },
 ];
 

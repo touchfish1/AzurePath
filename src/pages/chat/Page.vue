@@ -12,7 +12,6 @@ import {
   fileAccept,
   fileReject,
   fileList,
-  getFileDownloadUrl,
   discoveryPeers,
   onChatMessage,
   onPeerList,

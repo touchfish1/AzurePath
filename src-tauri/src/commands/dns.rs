@@ -9,10 +9,11 @@ pub async fn dns_lookup(
     app: AppHandle,
     target: String,
     record_type: RecordType,
+    dns_server: Option<String>,
 ) -> Result<String, String> {
     let task_id = Uuid::new_v4().to_string();
 
-    let result = dns::resolve(&target, &record_type).await;
+    let result = dns::resolve(&target, &record_type, dns_server.as_deref()).await;
 
     match result {
         Ok(records) => {
@@ -258,10 +259,10 @@ mod tests {
 
     #[test]
     fn test_dns_lookup_signature_compatible() {
-        // Compile-time check: dns_lookup(target: String, record_type: RecordType)
-        // are the two key parameters.  This closure verifies the types
+        // Compile-time check: dns_lookup(target: String, record_type: RecordType, dns_server: Option<String>)
+        // are the three key parameters.  This closure verifies the types
         // are usable as Tauri command parameters.
-        let _check = |target: String, _record_type: RecordType| {
+        let _check = |target: String, _record_type: RecordType, _dns_server: Option<String>| {
             let _ = target;
         };
         let _ = _check;

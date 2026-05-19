@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from "vue";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { Search, Trash2, Star, Copy, FileText, Image, File, X } from "lucide-vue-next";
 import Button from "@/components/ui/button/Button.vue";
 import {
@@ -145,6 +146,13 @@ function typeIcon(type: string) {
   if (type === "image") return Image;
   return File;
 }
+
+function onImageError(event: Event) {
+  const img = event.target as HTMLImageElement;
+  img.style.display = "none";
+  const fallback = img.nextElementSibling;
+  if (fallback) fallback.classList.remove("hidden");
+}
 </script>
 
 <template>
@@ -201,7 +209,15 @@ function typeIcon(type: string) {
               {{ truncate(entry.text_content, 200) }}
             </div>
             <div v-else-if="entry.content_type === 'image' && entry.image_path" class="text-sm text-ink-soft">
-              <p class="truncate">{{ entry.image_path.split('/').pop() || entry.image_path }}</p>
+              <img
+                :src="convertFileSrc(entry.image_path)"
+                :alt="entry.image_path.split('/').pop() || 'image'"
+                class="h-24 w-auto rounded-lg object-cover"
+                @error="onImageError"
+              />
+              <p class="mt-1 truncate">
+                {{ entry.image_path.split('/').pop() || entry.image_path }}
+              </p>
             </div>
             <div v-else-if="entry.content_type === 'file' && entry.file_paths" class="text-sm text-ink-soft">
               <p v-for="f in entry.file_paths" :key="f" class="truncate">{{ f }}</p>

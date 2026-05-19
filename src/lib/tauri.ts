@@ -187,9 +187,14 @@ export function portScanStop(taskId: string): Promise<void> {
 /**
  * Perform a DNS lookup.
  * Returns the parsed DNS records directly.
+ * Optionally specify a custom DNS server (ip:port format, defaults to 8.8.8.8:53).
  */
-export function dnsLookup(target: string, recordType: RecordType): Promise<DnsRecord[]> {
-  return invoke<string>("dns_lookup", { target, recordType }).then(
+export function dnsLookup(target: string, recordType: RecordType, dnsServer?: string): Promise<DnsRecord[]> {
+  return invoke<string>("dns_lookup", {
+    target,
+    recordType,
+    ...(dnsServer !== undefined ? { dnsServer } : {}),
+  }).then(
     (result) => JSON.parse(result) as DnsRecord[],
   );
 }

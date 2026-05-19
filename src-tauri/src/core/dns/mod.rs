@@ -12,17 +12,63 @@ const TYPE_NS: u16 = 2;
 const TYPE_SOA: u16 = 6;
 const TYPE_TXT: u16 = 16;
 
-/// Resolve DNS records for a target domain using a public DNS server.
-pub async fn resolve(target: &str, record_type: &RecordType) -> Result<Vec<DnsRecord>, String> {
+/// Resolve DNS records for a target domain, optionally specifying a custom DNS server.
+///
+/// `dns_server` should be in `ip:port` format (e.g., `8.8.8.8:53`).
+/// If the port is omitted, `:53` is appended automatically.
+/// When `None`, the default server `8.8.8.8:53` is used.
+pub async fn resolve(
+    target: &str,
+    record_type: &RecordType,
+    dns_server: Option<&str>,
+) -> Result<Vec<DnsRecord>, String> {
+    let server = match dns_server {
+        Some(s) => {
+            let s = s.trim();
+            if s.is_empty() {
+                DNS_SERVER.to_string()
+            } else if s.contains(':') {
+                validate_dns_server(s)?;
+                s.to_string()
+            } else {
+                let full = format!("{}:53", s);
+                validate_dns_server(&full)?;
+                full
+            }
+        }
+        None => DNS_SERVER.to_string(),
+    };
+
     let types = get_qtypes(record_type);
     let mut all_records = Vec::new();
 
     for qtype in types {
-        let records = resolve_qtype(target, qtype, record_type).await?;
+        let records = resolve_qtype(target, qtype, record_type, &server).await?;
         all_records.extend(records);
     }
 
     Ok(all_records)
+}
+
+/// Validate that a DNS server address is in valid `ip:port` format.
+fn validate_dns_server(addr: &str) -> Result<(), String> {
+    let parts: Vec<&str> = addr.rsplitn(2, ':').collect();
+    // parts[0] = port, parts[1] = ip (when split with rsplitn(2))
+    if parts.len() != 2 {
+        return Err(
+            "DNS 服务器地址格式无效，请使用 ip:port 格式 (例如 8.8.8.8:53)".to_string(),
+        );
+    }
+    let port: u16 = parts[0].parse().map_err(|_| {
+        format!(
+            "DNS 服务器端口号无效: '{}'",
+            parts[0]
+        )
+    })?;
+    if port == 0 {
+        return Err("DNS 服务器端口不能为 0".to_string());
+    }
+    Ok(())
 }
 
 /// Get the DNS query type numbers for a given RecordType.
@@ -44,6 +90,7 @@ async fn resolve_qtype(
     target: &str,
     qtype: u16,
     _record_type: &RecordType,
+    server: &str,
 ) -> Result<Vec<DnsRecord>, String> {
     // Build the DNS query
     let query = build_dns_query(target, qtype)?;
@@ -54,7 +101,7 @@ async fn resolve_qtype(
         .map_err(|e| format!("Failed to bind UDP socket: {}", e))?;
 
     socket
-        .send_to(&query, DNS_SERVER)
+        .send_to(&query, server)
         .await
         .map_err(|e| format!("Failed to send DNS query: {}", e))?;
 

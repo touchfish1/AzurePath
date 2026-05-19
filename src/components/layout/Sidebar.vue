@@ -10,6 +10,7 @@ import {
   MessageSquare,
   Clipboard,
   Wifi,
+  FileUp,
 } from "lucide-vue-next";
 
 const route = useRoute();
@@ -31,6 +32,7 @@ const navItems: NavItem[] = [
   { label: "消息", name: "chat", path: "/chat", icon: MessageSquare },
   { label: "剪贴板", name: "clipboard", path: "/clipboard", icon: Clipboard },
   { label: "网络嗅探", name: "network-sniffer", path: "/network-sniffer", icon: Wifi },
+  { label: "文件传输", name: "files", path: "/files", icon: FileUp },
 ];
 
 function isActive(path: string): boolean {

@@ -7,11 +7,12 @@ AzurePath is a cross-platform desktop intranet operations toolkit built with Tau
 - **📡 Ping** — ICMP ping with customizable count, interval, and timeout
 - **🗺️ Traceroute** — Route tracing with per-hop latency measurement
 - **🔍 Port Scan** — Concurrent TCP port scanning with configurable range and concurrency
-- **🌐 DNS Lookup** — Supports A / AAAA / CNAME / MX / NS / SOA / TXT / ALL record types
+- **🌐 DNS Lookup** — Supports A / AAAA / CNAME / MX / NS / SOA / TXT / ALL record types, with custom DNS server support
 - **💬 LAN Chat** — Peer discovery and instant messaging over LAN
 - **📁 File Transfer** — Peer-to-peer file transfer within local network
-- **📋 Clipboard Manager** — Clipboard history with persistent storage, search, favorites, and LAN sync
-- **📡 Network Sniffer** — LAN device discovery, port scanning, and service version detection (in development)
+- **📊 Activity Overview** — Dashboard summarizing recent clipboard activity, device discovery, and active nodes
+- **📋 Clipboard Manager** — Clipboard history with persistent storage, search, favorites, LAN sync, and image thumbnail preview
+- **📡 Network Sniffer** — LAN device discovery, port scanning, service banner grabbing, fingerprint recognition, OS detection, and result export
 
 ## Tech Stack
 

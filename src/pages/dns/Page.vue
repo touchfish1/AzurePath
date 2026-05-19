@@ -14,6 +14,7 @@ import {
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
 const target = ref("");
+const dnsServer = ref("8.8.8.8");
 const recordType = ref<RecordType>("a");
 const loading = ref(false);
 const error = ref("");
@@ -42,7 +43,7 @@ async function lookup() {
   lastTarget.value = target.value.trim();
 
   try {
-    const result = await dnsLookup(target.value.trim(), recordType.value);
+    const result = await dnsLookup(target.value.trim(), recordType.value, dnsServer.value);
     records.value = result;
   } catch (e) {
     error.value = String(e);
@@ -91,6 +92,15 @@ onUnmounted(() => {
             :disabled="loading"
             class="w-full rounded-lg border border-paper-deep bg-paper-warm/50 px-3 py-2 text-sm text-ink placeholder:text-ink-faint/50 outline-none transition-colors focus:border-bamboo/50 focus:ring-1 focus:ring-bamboo/20 disabled:opacity-50"
             @keyup.enter="lookup"
+          />
+        </div>
+        <div class="w-40">
+          <label class="mb-1 block text-xs font-medium text-ink-soft">DNS 服务器</label>
+          <input
+            v-model="dnsServer"
+            placeholder="例如 8.8.8.8 或 8.8.8.8:53"
+            :disabled="loading"
+            class="w-full rounded-lg border border-paper-deep bg-paper-warm/50 px-3 py-2 text-sm text-ink placeholder:text-ink-faint/50 outline-none transition-colors focus:border-bamboo/50 focus:ring-1 focus:ring-bamboo/20 disabled:opacity-50"
           />
         </div>
         <div class="w-28">
