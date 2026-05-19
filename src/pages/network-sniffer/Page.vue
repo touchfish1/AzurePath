@@ -13,6 +13,7 @@ import {
   ArrowDown,
 } from "lucide-vue-next";
 import Button from "@/components/ui/button/Button.vue";
+import ReportButton from "@/components/ReportButton.vue";
 import PresetDropdown from "@/components/preset/PresetDropdown.vue";
 import { usePresetStore } from "@/stores/preset";
 import PortModal from "@/components/network-sniffer/PortModal.vue";
@@ -150,6 +151,20 @@ const summary = computed(() => {
   );
   return { hosts: devices.value.length, ports: totalPorts, services: totalServices };
 });
+
+const reportRows = computed(() =>
+  devices.value.map((d) => ({
+    ip: d.ip,
+    hostname: d.hostname || "-",
+    mac: d.mac || "-",
+    os: d.os || "-",
+    ports: d.openPorts
+      .map((p: { port: number; service: string | null }) =>
+        `${p.port}${p.service ? "/" + p.service : ""}`
+      )
+      .join(", "),
+  }))
+);
 
 function toggleDevice(ip: string) {
   if (expandedDevices.value.has(ip)) {
@@ -529,6 +544,17 @@ onUnmounted(cleanup);
                 class="w-40 rounded-lg border border-paper-deep bg-paper-warm/50 py-1 pl-7 pr-2 text-xs text-ink outline-none"
               />
             </div>
+            <ReportButton
+              title="网络嗅探结果"
+              :columns="[
+                { key: 'ip', label: 'IP 地址' },
+                { key: 'hostname', label: '主机名' },
+                { key: 'mac', label: 'MAC 地址' },
+                { key: 'os', label: '操作系统' },
+                { key: 'ports', label: '开放端口' },
+              ]"
+              :rows="reportRows"
+            />
             <Button variant="ghost" size="sm" @click="exportResults('json')">
               <Download class="mr-1 h-3 w-3" />
               导出

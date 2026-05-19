@@ -68,6 +68,31 @@ const routes: RouteRecordRaw[] = [
     component: () => import("@/pages/topology/Page.vue"),
   },
   {
+    path: "/wol",
+    name: "wol",
+    component: () => import("@/pages/wol/Page.vue"),
+  },
+  {
+    path: "/terminal",
+    name: "terminal",
+    component: () => import("@/pages/terminal/Page.vue"),
+  },
+  {
+    path: "/monitor",
+    name: "monitor",
+    component: () => import("@/pages/monitor/Page.vue"),
+  },
+  {
+    path: "/mdns",
+    name: "mdns",
+    component: () => import("@/pages/mdns/Page.vue"),
+  },
+  {
+    path: "/bandwidth",
+    name: "bandwidth",
+    component: () => import("@/pages/bandwidth/Page.vue"),
+  },
+  {
     path: "/settings",
     name: "settings",
     component: () => import("@/pages/settings/Page.vue"),

@@ -1,12 +1,42 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, computed } from "vue";
+import { onMounted, onUnmounted, ref, computed, watch } from "vue";
 import { Play, Square, Scan, Copy, ArrowUp, ArrowDown } from "lucide-vue-next";
 import Button from "@/components/ui/button/Button.vue";
 import PresetDropdown from "@/components/preset/PresetDropdown.vue";
+import ReportButton from "@/components/ReportButton.vue";
 import { usePortScanStore } from "@/stores/portScan";
 import { usePresetStore } from "@/stores/preset";
 import { useToastStore } from "@/stores/toast";
 import type { Preset } from "@/lib/tauri";
+
+// ─── localStorage port scan history ─────────────────────────────
+const PORT_SCAN_KEY = "port_scan_history";
+
+interface PortScanEntry {
+  target: string;
+  port: number;
+  service: string | null;
+  state: string;
+  timestamp: string;
+}
+
+function savePortScanResults(target: string, ports: { port: number; service: string | null }[]) {
+  try {
+    const raw = localStorage.getItem(PORT_SCAN_KEY);
+    const history: PortScanEntry[] = raw ? JSON.parse(raw) : [];
+    const now = new Date().toISOString();
+    for (const p of ports) {
+      history.push({ target, port: p.port, service: p.service, state: "open", timestamp: now });
+    }
+    // Keep only last 200 entries
+    while (history.length > 200) {
+      history.shift();
+    }
+    localStorage.setItem(PORT_SCAN_KEY, JSON.stringify(history));
+  } catch {
+    // Ignore localStorage errors
+  }
+}
 
 const toast = useToastStore();
 const presetStore = usePresetStore();
@@ -89,14 +119,40 @@ onMounted(async () => {
 onUnmounted(() => {
   store.detachListeners();
 });
+
+// Watch for scan completion and save to localStorage
+watch(
+  () => store.completeInfo,
+  (info) => {
+    if (info && store.foundPorts.length > 0) {
+      savePortScanResults(store.target, store.foundPorts);
+    }
+  },
+);
 </script>
 
 <template>
   <div class="flex h-full flex-col p-4 md:p-6 space-y-4 md:space-y-6 animate-view-fade">
     <!-- Header -->
-    <div>
-      <h1 class="text-2xl font-display font-bold text-ink">端口扫描</h1>
-      <p class="mt-0.5 text-sm text-ink-faint">扫描目标主机的开放端口</p>
+    <div class="flex items-start justify-between">
+      <div>
+        <h1 class="text-2xl font-display font-bold text-ink">端口扫描</h1>
+        <p class="mt-0.5 text-sm text-ink-faint">扫描目标主机的开放端口</p>
+      </div>
+      <ReportButton
+        v-if="store.foundPorts.length > 0"
+        title="端口扫描结果"
+        :columns="[
+          { key: 'target', label: '目标' },
+          { key: 'port', label: '端口' },
+          { key: 'service', label: '服务' },
+        ]"
+        :rows="store.foundPorts.map(fp => ({
+          target: store.target,
+          port: fp.port,
+          service: fp.service || '未知',
+        }))"
+      />
     </div>
 
     <!-- Input card -->

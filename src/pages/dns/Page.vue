@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted } from "vue";
 import { Search, Copy } from "lucide-vue-next";
 import { useToastStore } from "@/stores/toast";
+import ReportButton from "@/components/ReportButton.vue";
 
 const toast = useToastStore();
 
@@ -85,9 +86,22 @@ onUnmounted(() => {
 <template>
   <div class="flex h-full flex-col p-4 md:p-6 space-y-4 md:space-y-6 animate-view-fade">
     <!-- Header -->
-    <div>
-      <h1 class="text-2xl font-display font-bold text-ink">DNS 查询</h1>
-      <p class="mt-0.5 text-sm text-ink-faint">查询域名解析记录</p>
+    <div class="flex items-start justify-between">
+      <div>
+        <h1 class="text-2xl font-display font-bold text-ink">DNS 查询</h1>
+        <p class="mt-0.5 text-sm text-ink-faint">查询域名解析记录</p>
+      </div>
+      <ReportButton
+        v-if="records.length > 0"
+        title="DNS 查询结果"
+        :columns="[
+          { key: 'name', label: '名称' },
+          { key: 'type', label: '类型' },
+          { key: 'value', label: '值' },
+          { key: 'ttl', label: 'TTL' },
+        ]"
+        :rows="records"
+      />
     </div>
 
     <!-- Input card -->

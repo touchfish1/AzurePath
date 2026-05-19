@@ -1,12 +1,42 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted } from "vue";
+import { onMounted, onUnmounted, watch } from "vue";
 import { Play, Square, Radio, Copy } from "lucide-vue-next";
 import Button from "@/components/ui/button/Button.vue";
 import PresetDropdown from "@/components/preset/PresetDropdown.vue";
+import ReportButton from "@/components/ReportButton.vue";
 import { usePingStore } from "@/stores/ping";
 import { usePresetStore } from "@/stores/preset";
 import { useToastStore } from "@/stores/toast";
 import type { Preset } from "@/lib/tauri";
+
+// ─── localStorage ping history ───────────────────────────────────
+const PING_HISTORY_KEY = "ping_history";
+
+interface PingHistoryEntry {
+  target: string;
+  latency: number;
+  timestamp: string;
+}
+
+function savePingResults(target: string, results: { latencyMs: number | null }[]) {
+  try {
+    const raw = localStorage.getItem(PING_HISTORY_KEY);
+    const history: PingHistoryEntry[] = raw ? JSON.parse(raw) : [];
+    const now = new Date().toISOString();
+    for (const r of results) {
+      if (r.latencyMs !== null) {
+        history.push({ target, latency: r.latencyMs, timestamp: now });
+      }
+    }
+    // Keep only last 500 entries total
+    while (history.length > 500) {
+      history.shift();
+    }
+    localStorage.setItem(PING_HISTORY_KEY, JSON.stringify(history));
+  } catch {
+    // Ignore localStorage errors
+  }
+}
 
 const toast = useToastStore();
 const presetStore = usePresetStore();
@@ -46,14 +76,42 @@ onUnmounted(() => {
   // Only detach listeners — never stop a running task
   store.detachListeners();
 });
+
+// Watch for batch completion and save to localStorage
+watch(
+  () => store.stats,
+  (stats) => {
+    if (stats && store.results.length > 0) {
+      savePingResults(store.target, store.results);
+    }
+  },
+);
 </script>
 
 <template>
   <div class="flex h-full flex-col p-4 md:p-6 space-y-4 md:space-y-6 animate-view-fade">
     <!-- Header -->
-    <div>
-      <h1 class="text-2xl font-display font-bold text-ink">Ping</h1>
-      <p class="mt-0.5 text-sm text-ink-faint">测试网络连通性与延迟</p>
+    <div class="flex items-start justify-between">
+      <div>
+        <h1 class="text-2xl font-display font-bold text-ink">Ping</h1>
+        <p class="mt-0.5 text-sm text-ink-faint">测试网络连通性与延迟</p>
+      </div>
+      <ReportButton
+        v-if="store.results.length > 0"
+        title="Ping 测试结果"
+        :columns="[
+          { key: 'seq', label: '序号' },
+          { key: 'ttl', label: 'TTL' },
+          { key: 'latencyMs', label: '延迟 (ms)' },
+          { key: 'status', label: '状态' },
+        ]"
+        :rows="store.results.map(r => ({
+          seq: r.seq,
+          ttl: r.ttl,
+          latencyMs: r.latencyMs !== null ? r.latencyMs.toFixed(1) : '---',
+          status: r.status === 'success' ? '成功' : r.status,
+        }))"
+      />
     </div>
 
     <!-- Input card -->

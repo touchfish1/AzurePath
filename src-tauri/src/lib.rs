@@ -11,6 +11,8 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_window_state::Builder::new().build())
+        .plugin(tauri_plugin_autostart::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
@@ -91,6 +93,12 @@ pub fn run() {
 
             Ok(())
         })
+        .single_instance(|app, _argv, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             // Phase 1
             commands::ping::ping_start,
@@ -154,11 +162,41 @@ pub fn run() {
             commands::http_check::http_check,
             commands::ssl_check::ssl_check,
             commands::mac_lookup::mac_lookup,
-            // Phase 9 — Direction A
+            // Phase 9 — WOL
+            commands::wol::wol_send,
+            commands::wol::wol_save,
+            commands::wol::wol_list,
+            commands::wol::wol_delete,
+            // Phase 10 — Direction A
             commands::speedtest::start_speedtest,
             commands::preset::save_preset,
             commands::preset::load_presets,
             commands::preset::delete_preset,
+            // Phase 11 — SSH Terminal
+            commands::ssh::ssh_connect,
+            commands::ssh::ssh_disconnect,
+            commands::ssh::ssh_send_input,
+            commands::ssh::ssh_resize,
+            commands::ssh::ssh_list_sessions,
+            // Phase 12 — Monitor
+            commands::monitor::monitor_start,
+            commands::monitor::monitor_stop,
+            commands::monitor::monitor_status,
+            commands::monitor::monitor_add_target,
+            commands::monitor::monitor_list_targets,
+            commands::monitor::monitor_delete_target,
+            commands::monitor::monitor_get_history,
+            commands::monitor::monitor_get_all_recent_history,
+            // Phase 13 — Export Data
+            commands::export_data::save_file,
+            // Phase 14 — mDNS Discovery
+            commands::mdns::mdns_discover,
+            // Phase 15 — Bandwidth Monitor
+            commands::bandwidth::get_interfaces,
+            commands::bandwidth::start_bandwidth_monitor,
+            commands::bandwidth::stop_bandwidth_monitor,
+            // Phase 16 — Report Export
+            commands::report::save_report,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

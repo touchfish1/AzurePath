@@ -646,3 +646,274 @@ export function loadPresets(feature?: string): Promise<Preset[]> {
 export function deletePreset(id: string): Promise<void> {
   return invoke<void>("delete_preset", { id });
 }
+
+// ============================================================
+// Wake-on-LAN (WOL)
+// ============================================================
+
+export interface WolRecord {
+  id: string;
+  mac: string;
+  broadcastIp: string;
+  port: number;
+  label: string;
+  lastUsed: string;
+}
+
+export interface WolResult {
+  success: boolean;
+  message: string;
+}
+
+export function wolSend(mac: string, broadcastIp: string, port: number): Promise<WolResult> {
+  return invoke<WolResult>("wol_send", { mac, broadcastIp, port });
+}
+
+export function wolSave(mac: string, broadcastIp: string, label: string): Promise<WolRecord> {
+  return invoke<WolRecord>("wol_save", { mac, broadcastIp, label });
+}
+
+export function wolList(): Promise<WolRecord[]> {
+  return invoke<WolRecord[]>("wol_list");
+}
+
+export function wolDelete(id: string): Promise<void> {
+  return invoke<void>("wol_delete", { id });
+}
+
+// ============================================================
+// SSH Terminal
+// ============================================================
+
+export interface SshSession {
+  id: string;
+  host: string;
+  port: number;
+  username: string;
+  connectedAt: string;
+}
+
+export interface SshOutputPayload {
+  sessionId: string;
+  data: string; // base64-encoded terminal output
+}
+
+export interface SshConnectedPayload {
+  sessionId: string;
+  host: string;
+  port: number;
+  username: string;
+}
+
+export interface SshDisconnectedPayload {
+  sessionId: string;
+}
+
+export interface SshErrorPayload {
+  sessionId: string;
+  error: string;
+}
+
+/** Connect to an SSH server and start an interactive shell session. */
+export function sshConnect(
+  host: string,
+  port: number,
+  username: string,
+  password: string,
+  id?: string,
+): Promise<void> {
+  return invoke<void>("ssh_connect", {
+    id: id ?? "",
+    host,
+    port,
+    username,
+    password,
+  });
+}
+
+/** Disconnect an SSH session. */
+export function sshDisconnect(id: string): Promise<void> {
+  return invoke<void>("ssh_disconnect", { id });
+}
+
+/** Send input (base64-encoded) to an SSH session. */
+export function sshSendInput(id: string, data: string): Promise<void> {
+  return invoke<void>("ssh_send_input", { id, data });
+}
+
+/** Resize the PTY of an SSH session. */
+export function sshResize(id: string, cols: number, rows: number): Promise<void> {
+  return invoke<void>("ssh_resize", { id, cols, rows });
+}
+
+/** List all active SSH sessions. */
+export function sshListSessions(): Promise<SshSession[]> {
+  return invoke<SshSession[]>("ssh_list_sessions");
+}
+
+/** Listen for a new SSH session being created (contains the session ID). */
+export function onSshSessionCreated(cb: (payload: { sessionId: string }) => void): Promise<UnlistenFn> {
+  return listen<{ sessionId: string }>("ssh:session_created", (event) => cb(event.payload));
+}
+
+/** Listen for SSH connected event. */
+export function onSshConnected(cb: (payload: SshConnectedPayload) => void): Promise<UnlistenFn> {
+  return listen<SshConnectedPayload>("ssh:connected", (event) => cb(event.payload));
+}
+
+/** Listen for SSH output (base64-encoded terminal data). */
+export function onSshOutput(cb: (payload: SshOutputPayload) => void): Promise<UnlistenFn> {
+  return listen<SshOutputPayload>("ssh:output", (event) => cb(event.payload));
+}
+
+/** Listen for SSH session disconnected. */
+export function onSshDisconnected(cb: (payload: SshDisconnectedPayload) => void): Promise<UnlistenFn> {
+  return listen<SshDisconnectedPayload>("ssh:disconnected", (event) => cb(event.payload));
+}
+
+/** Listen for SSH errors. */
+export function onSshError(cb: (payload: SshErrorPayload) => void): Promise<UnlistenFn> {
+  return listen<SshErrorPayload>("ssh:error", (event) => cb(event.payload));
+}
+
+// ============================================================
+// Network Performance Monitor
+// ============================================================
+
+export interface MonitorTarget {
+  id: string;
+  host: string;
+  label: string;
+  intervalSecs: number;
+  enabled: boolean;
+}
+
+export interface PingRecord {
+  id: number;
+  targetId: string;
+  targetHost: string;
+  timestamp: string;
+  latencyMs: number | null;
+  lossRate: number;
+}
+
+export interface MonitorUpdate {
+  targetId: string;
+  targetHost: string;
+  label: string;
+  timestamp: string;
+  latencyMs: number | null;
+  lossRate: number;
+  minMs: number;
+  avgMs: number;
+  maxMs: number;
+  sent: number;
+  received: number;
+}
+
+export function monitorStart(): Promise<void> {
+  return invoke<void>("monitor_start");
+}
+
+export function monitorStop(): Promise<void> {
+  return invoke<void>("monitor_stop");
+}
+
+export function monitorStatus(): Promise<boolean> {
+  return invoke<boolean>("monitor_status");
+}
+
+export function monitorAddTarget(
+  host: string,
+  label: string,
+  intervalSecs: number,
+): Promise<MonitorTarget> {
+  return invoke<MonitorTarget>("monitor_add_target", { host, label, intervalSecs });
+}
+
+export function monitorListTargets(): Promise<MonitorTarget[]> {
+  return invoke<MonitorTarget[]>("monitor_list_targets");
+}
+
+export function monitorDeleteTarget(id: string): Promise<void> {
+  return invoke<void>("monitor_delete_target", { id });
+}
+
+export function monitorGetHistory(targetId: string, sinceDays: number): Promise<PingRecord[]> {
+  return invoke<PingRecord[]>("monitor_get_history", { targetId, sinceDays });
+}
+
+export function monitorGetAllRecentHistory(sinceDays: number): Promise<PingRecord[]> {
+  return invoke<PingRecord[]>("monitor_get_all_recent_history", { sinceDays });
+}
+
+export function onMonitorUpdate(
+  cb: (payload: MonitorUpdate) => void,
+): Promise<UnlistenFn> {
+  return listen<MonitorUpdate>("monitor:update", (event) => cb(event.payload));
+}
+
+// ============================================================
+// mDNS Service Discovery
+// ============================================================
+
+export interface MdnsService {
+  serviceType: string;
+  hostname: string;
+  ip: string;
+  port: number;
+  txt: Record<string, string>;
+}
+
+export interface MdnsProgress {
+  status: string;
+  message?: string;
+  count?: number;
+}
+
+export function mdnsDiscover(): Promise<MdnsService[]> {
+  return invoke<MdnsService[]>("mdns_discover");
+}
+
+export function onMdnsProgress(cb: (payload: MdnsProgress) => void): Promise<UnlistenFn> {
+  return listen<MdnsProgress>("mdns:progress", (event) => cb(event.payload));
+}
+
+// ============================================================
+// Bandwidth Monitor
+// ============================================================
+
+export interface InterfaceInfo {
+  name: string;
+  friendlyName: string;
+  ip: string;
+}
+
+export interface BandwidthSample {
+  interface: string;
+  downloadBps: number;
+  uploadBps: number;
+  totalRx: number;
+  totalTx: number;
+  timestamp: string;
+}
+
+export function getInterfaces(): Promise<InterfaceInfo[]> {
+  return invoke<InterfaceInfo[]>("get_interfaces");
+}
+
+export function startBandwidthMonitor(): Promise<void> {
+  return invoke<void>("start_bandwidth_monitor");
+}
+
+export function stopBandwidthMonitor(): Promise<void> {
+  return invoke<void>("stop_bandwidth_monitor");
+}
+
+export function onBandwidthData(cb: (payload: BandwidthSample[]) => void): Promise<UnlistenFn> {
+  return listen<BandwidthSample[]>("bandwidth:data", (event) => cb(event.payload));
+}
+
+export function onBandwidthError(cb: (payload: { error: string }) => void): Promise<UnlistenFn> {
+  return listen<{ error: string }>("bandwidth:error", (event) => cb(event.payload));
+}
