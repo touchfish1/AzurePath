@@ -1,1 +1,5 @@
-// Core logic for network sniffer (to be implemented in a future task).
+pub mod banner;
+pub mod discovery;
+pub mod fingerprint;
+pub mod os_detect;
+pub mod port_scanner;

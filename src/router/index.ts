@@ -43,6 +43,11 @@ const routes: RouteRecordRaw[] = [
     component: () => import("@/pages/clipboard/Page.vue"),
   },
   {
+    path: "/network-sniffer",
+    name: "network-sniffer",
+    component: () => import("@/pages/network-sniffer/Page.vue"),
+  },
+  {
     path: "/files",
     redirect: "/chat",
   },

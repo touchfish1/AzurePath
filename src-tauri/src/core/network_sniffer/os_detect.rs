@@ -44,6 +44,7 @@ pub fn assemble_device(
         ip: ip.to_string(),
         hostname: hostname.filter(|h| !h.is_empty()),
         mac,
+        vendor: mac_vendor,
         os,
         open_ports,
         is_alive: true,

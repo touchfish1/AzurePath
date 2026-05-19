@@ -36,6 +36,7 @@ pub struct DeviceResult {
     pub ip: String,
     pub hostname: Option<String>,
     pub mac: Option<String>,
+    pub vendor: Option<String>,
     pub os: Option<String>,
     pub open_ports: Vec<PortResult>,
     pub is_alive: bool,

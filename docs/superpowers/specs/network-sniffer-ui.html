@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>网络嗅探 - UI 设计稿 v2</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", sans-serif; background: #f5f2ed; color: #2c2c2c; }
+
+  .app { display: flex; min-height: 100vh; }
+
+  /* Sidebar */
+  .sidebar { width: 220px; background: #2c2c2c; padding: 20px 12px; display: flex; flex-direction: column; gap: 4px; }
+  .sidebar-logo { color: #e8e4db; font-size: 20px; font-weight: 700; padding: 8px 12px 20px; letter-spacing: -0.3px; border-bottom: 1px solid rgba(255,255,255,0.08); margin-bottom: 12px; }
+  .sidebar-item { color: rgba(232,228,219,0.55); padding: 8px 12px; border-radius: 8px; font-size: 14px; transition: all .15s; }
+  .sidebar-item.active { color: #e8e4db; background: rgba(255,255,255,0.08); font-weight: 500; }
+  .sidebar-item .icon { margin-right: 8px; opacity: 0.7; }
+  .sidebar-item.active .icon { opacity: 1; }
+
+  .main { flex: 1; display: flex; flex-direction: column; }
+
+  .header { border-bottom: 1px solid rgba(0,0,0,0.06); padding: 16px 32px; }
+  .header h1 { font-size: 22px; font-weight: 700; }
+  .header p { font-size: 13px; color: #888; margin-top: 2px; }
+
+  .content { flex: 1; padding: 24px 32px; overflow-y: auto; display: flex; flex-direction: column; gap: 20px; }
+
+  .card { background: #fff; border-radius: 12px; border: 1px solid rgba(0,0,0,0.05); padding: 20px; }
+  .card-title { font-size: 14px; font-weight: 600; margin-bottom: 14px; color: #555; text-transform: uppercase; letter-spacing: 0.5px; }
+
+  .target-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .target-row input { flex: 1; min-width: 200px; padding: 10px 14px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; outline: none; font-family: "SF Mono", "Cascadia Code", monospace; background: #fafafa; transition: border-color .15s; }
+  .target-row input:focus { border-color: #7ab0a1; background: #fff; }
+
+  .mode-group { display: flex; gap: 6px; background: #f2f2f2; border-radius: 8px; padding: 3px; }
+  .mode-btn { padding: 7px 16px; border: none; border-radius: 6px; font-size: 13px; cursor: pointer; background: transparent; color: #666; transition: all .15s; font-weight: 500; }
+  .mode-btn.active { background: #fff; color: #2c2c2c; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+  .mode-btn .sub { display: block; font-size: 10px; font-weight: 400; color: #999; margin-top: 1px; }
+
+  .btn { padding: 9px 20px; border: none; border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; transition: all .15s; }
+  .btn-primary { background: #7ab0a1; color: #fff; }
+  .btn-primary:hover { background: #689f8f; }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-danger { background: #e87a7a; color: #fff; }
+  .btn-sm { padding: 5px 12px; font-size: 12px; }
+
+  /* Port selector */
+  .port-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+  .port-preset { display: flex; gap: 4px; flex-wrap: wrap; }
+  .port-preset button { padding: 4px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 12px; background: #fff; cursor: pointer; color: #555; transition: all .15s; }
+  .port-preset button.active { border-color: #7ab0a1; background: rgba(122,176,161,0.08); color: #7ab0a1; font-weight: 500; }
+
+  .port-custom-btn { padding: 5px 14px; border: 1px dashed #bbb; border-radius: 6px; font-size: 12px; background: transparent; cursor: pointer; color: #888; transition: all .15s; }
+  .port-custom-btn:hover { border-color: #7ab0a1; color: #7ab0a1; background: rgba(122,176,161,0.04); }
+
+  /* Port tags */
+  .port-tags { display: flex; gap: 4px; flex-wrap: wrap; }
+  .port-tag { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px 3px 10px; background: rgba(122,176,161,0.1); border: 1px solid rgba(122,176,161,0.2); border-radius: 6px; font-size: 12px; color: #5a9a8a; font-family: "SF Mono", "Cascadia Code", monospace; }
+  .port-tag .remove { cursor: pointer; opacity: 0.5; font-size: 14px; line-height: 1; }
+  .port-tag .remove:hover { opacity: 1; }
+
+  /* Modal overlay */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+  .modal { background: #fff; border-radius: 16px; width: 640px; max-height: 80vh; display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,0.15); overflow: hidden; }
+  .modal-header { padding: 18px 24px; border-bottom: 1px solid #eee; display: flex; align-items: center; justify-content: space-between; }
+  .modal-header h2 { font-size: 16px; font-weight: 600; }
+  .modal-close { width: 28px; height: 28px; border: none; background: #f2f2f2; border-radius: 6px; cursor: pointer; font-size: 16px; color: #888; display: flex; align-items: center; justify-content: center; }
+  .modal-close:hover { background: #e8e8e8; }
+
+  /* Quick input */
+  .quick-input { padding: 14px 24px; border-bottom: 1px solid #f2f2f2; display: flex; gap: 8px; align-items: center; }
+  .quick-input input { flex: 1; padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; outline: none; font-family: "SF Mono", "Cascadia Code", monospace; }
+  .quick-input input:focus { border-color: #7ab0a1; }
+  .quick-input input::placeholder { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", sans-serif; }
+
+  .modal-body { flex: 1; overflow-y: auto; padding: 16px 24px 24px; }
+
+  .search-ports { width: 100%; padding: 8px 12px 8px 32px; border: 1px solid #eee; border-radius: 6px; font-size: 13px; outline: none; margin-bottom: 16px; background: #fafafa; }
+  .search-ports:focus { border-color: #7ab0a1; background: #fff; }
+
+  /* Category sections */
+  .category { margin-bottom: 12px; }
+  .category-header { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; color: #555; transition: background .1s; user-select: none; }
+  .category-header:hover { background: #f5f5f5; }
+  .category-header .arrow { font-size: 10px; transition: transform .15s; color: #bbb; }
+  .category-header .arrow.open { transform: rotate(90deg); }
+  .category-header .count { margin-left: auto; font-size: 11px; color: #aaa; font-weight: 400; }
+
+  .category-grid { display: none; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 4px; padding: 4px 0 8px 20px; }
+  .category-grid.open { display: grid; }
+
+  .port-option { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 6px; cursor: pointer; transition: background .1s; border: 1px solid transparent; }
+  .port-option:hover { background: #f8f8f8; border-color: #eee; }
+  .port-option.selected { background: rgba(122,176,161,0.06); border-color: rgba(122,176,161,0.2); }
+  .port-option .pnum { font-family: "SF Mono", "Cascadia Code", monospace; font-size: 13px; font-weight: 600; color: #2c2c2c; min-width: 48px; }
+  .port-option .pname { font-size: 12px; color: #666; flex: 1; }
+  .port-option .check { width: 16px; height: 16px; border-radius: 4px; border: 2px solid #ddd; display: flex; align-items: center; justify-content: center; font-size: 10px; color: #fff; transition: all .1s; flex-shrink: 0; }
+  .port-option.selected .check { background: #7ab0a1; border-color: #7ab0a1; }
+
+  .modal-footer { padding: 12px 24px; border-top: 1px solid #eee; display: flex; align-items: center; justify-content: space-between; }
+  .modal-footer .selected-summary { font-size: 12px; color: #888; }
+  .modal-footer .selected-summary strong { color: #2c2c2c; }
+  .modal-actions { display: flex; gap: 8px; }
+
+  /* Results table */
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead th { text-align: left; padding: 10px 12px; border-bottom: 2px solid #eee; color: #888; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.3px; white-space: nowrap; }
+  tbody td { padding: 10px 12px; border-bottom: 1px solid #f2f2f2; vertical-align: middle; }
+  tbody tr:hover { background: #fafafa; }
+
+  .ip-cell { font-family: "SF Mono", "Cascadia Code", monospace; font-weight: 500; }
+  .service-tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 500; }
+  .tag-http { background: #d4e8f7; color: #2a6a9e; }
+  .tag-ssh { background: #d4f0d4; color: #2a7a2a; }
+  .tag-mysql { background: #f7e8d4; color: #9e6a2a; }
+  .tag-redis { background: #f7d4d4; color: #9e2a2a; }
+  .tag-https { background: #d4e8f7; color: #2a6a9e; }
+  .tag-smb { background: #f0f0d4; color: #7a7a2a; }
+  .tag-dns { background: #d4f0f0; color: #2a7a7a; }
+  .tag-unknown { background: #eee; color: #888; }
+
+  .version-cell { color: #666; font-family: "SF Mono", "Cascadia Code", monospace; font-size: 12px; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .banner-cell { color: #999; font-family: "SF Mono", "Cascadia Code", monospace; font-size: 11px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .tag-fast { background: #d4f0d4; color: #2a7a2a; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; }
+  .tag-deep { background: #d4e8f7; color: #2a6a9e; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; }
+
+  .device-header { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: #f8f8f8; border-radius: 8px; margin-bottom: 6px; font-size: 13px; }
+  .device-header .ip { font-family: "SF Mono", "Cascadia Code", monospace; font-weight: 600; }
+  .device-header .hostname { color: #888; }
+  .device-header .os { margin-left: auto; font-size: 12px; color: #666; }
+  .device-header .open-count { font-size: 12px; color: #888; }
+  .device-section { margin-bottom: 16px; }
+
+  .summary { display: flex; gap: 24px; padding: 16px 0 0; border-top: 1px solid #eee; margin-top: 4px; }
+  .summary-item { text-align: center; }
+  .summary-item .num { font-size: 24px; font-weight: 700; color: #2c2c2c; }
+  .summary-item .label { font-size: 12px; color: #888; margin-top: 2px; }
+
+  .progress-section { display: flex; align-items: center; gap: 14px; margin-top: 14px; padding-top: 14px; border-top: 1px solid #f2f2f2; }
+  .progress-bar-wrap { flex: 1; height: 6px; background: #eee; border-radius: 3px; overflow: hidden; }
+  .progress-bar-fill { height: 100%; width: 67%; background: linear-gradient(90deg, #7ab0a1, #5a9a8a); border-radius: 3px; }
+  .progress-text { font-size: 12px; color: #888; white-space: nowrap; min-width: 100px; }
+  .scanning-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; background: rgba(122,176,161,0.1); color: #5a9a8a; border-radius: 20px; font-size: 12px; font-weight: 500; }
+  .dot-pulse { width: 6px; height: 6px; background: #5a9a8a; border-radius: 50%; animation: pulse 1.2s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 0.3; transform: scale(0.8); } 50% { opacity: 1; transform: scale(1.2); } }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="sidebar">
+    <div class="sidebar-logo">AzurePath</div>
+    <div class="sidebar-item"><span class="icon">📡</span> Ping</div>
+    <div class="sidebar-item"><span class="icon">🗺️</span> Traceroute</div>
+    <div class="sidebar-item"><span class="icon">🔍</span> Port Scan</div>
+    <div class="sidebar-item"><span class="icon">🌐</span> DNS Lookup</div>
+    <div class="sidebar-item active"><span class="icon">📡</span> 网络嗅探</div>
+    <div class="sidebar-item" style="margin-top:auto;border-top:1px solid rgba(255,255,255,0.06);padding-top:12px;"><span class="icon">💬</span> LAN 聊天</div>
+  </div>
+
+  <div class="main">
+    <div class="header">
+      <h1>网络嗅探</h1>
+      <p>扫描局域网设备，检测开放端口与运行服务</p>
+    </div>
+
+    <div class="content">
+      <div class="card">
+        <div class="card-title">扫描目标</div>
+        <div class="target-row">
+          <input type="text" value="192.168.1.0/24" placeholder="IP / CIDR (e.g. 192.168.1.0/24)" />
+          <div class="mode-group">
+            <button class="mode-btn active">快速扫描<span class="sub">TOP 100 端口 · ~15s</span></button>
+            <button class="mode-btn">深度扫描<span class="sub">完整端口 · 服务指纹 · ~8min</span></button>
+          </div>
+          <button class="btn btn-primary">开始扫描</button>
+          <button class="btn btn-danger" disabled>停止</button>
+        </div>
+
+        <!-- Port selection -->
+        <div class="port-row">
+          <div class="port-preset">
+            <button class="active">常用 (TOP 100)</button>
+            <button>所有 (1-65535)</button>
+            <button>常见 Web</button>
+            <button>数据库</button>
+          </div>
+
+          <!-- Selected port tags + custom button -->
+          <div class="port-tags">
+            <span class="port-tag">80 <span class="remove">×</span></span>
+            <span class="port-tag">443 <span class="remove">×</span></span>
+            <span class="port-tag">22 <span class="remove">×</span></span>
+            <span class="port-tag">3306 <span class="remove">×</span></span>
+            <span class="port-tag">5432 <span class="remove">×</span></span>
+            <span class="port-tag">6379 <span class="remove">×</span></span>
+          </div>
+          <button class="port-custom-btn" onclick="document.getElementById('portModal').style.display='flex'">+ 自定义端口</button>
+        </div>
+
+        <!-- Progress -->
+        <div class="progress-section">
+          <div class="scanning-badge"><span class="dot-pulse"></span> 扫描中 (10.2.4.15)</div>
+          <div class="progress-bar-wrap"><div class="progress-bar-fill" style="width:67%"></div></div>
+          <span class="progress-text">67% · 47/70 主机 · 312 个服务发现</span>
+        </div>
+      </div>
+
+      <!-- Results -->
+      <div class="card" style="padding-bottom:12px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+          <div class="card-title" style="margin-bottom:0">扫描结果</div>
+          <div style="display:flex;gap:8px">
+            <select style="padding:5px 10px;border:1px solid #ddd;border-radius:6px;font-size:12px;color:#555;background:#fff">
+              <option>全部服务</option>
+              <option>HTTP/HTTPS</option>
+              <option>数据库</option>
+              <option>远程访问</option>
+            </select>
+            <input type="text" placeholder="搜索 IP / 端口 / 服务" style="padding:5px 10px;border:1px solid #ddd;border-radius:6px;font-size:12px;outline:none;width:180px" />
+            <button class="btn btn-sm btn-outline" style="background:transparent;border:1px solid #ddd;color:#666">导出</button>
+          </div>
+        </div>
+
+        <div class="device-section">
+          <div class="device-header">
+            <span class="ip">192.168.1.1</span>
+            <span class="hostname">router.local</span>
+            <span class="tag-fast">快速扫描</span>
+            <span class="os">🖥️ OpenWrt</span>
+            <span class="open-count">5 个端口开放</span>
+          </div>
+          <div class="table-wrap">
+            <table><thead><tr><th style="width:80px">端口</th><th style="width:80px">协议</th><th style="width:120px">服务</th><th>版本</th><th>Banner</th></tr></thead>
+            <tbody>
+              <tr><td class="ip-cell">22</td><td>TCP</td><td><span class="service-tag tag-ssh">SSH</span></td><td class="version-cell">OpenSSH 8.9p1 Ubuntu 3</td><td class="banner-cell">SSH-2.0-OpenSSH_8.9p1 Ubuntu-3</td></tr>
+              <tr><td class="ip-cell">80</td><td>TCP</td><td><span class="service-tag tag-http">HTTP</span></td><td class="version-cell">nginx 1.24.0</td><td class="banner-cell">HTTP/1.1 200 OK · Server: nginx/1.24.0</td></tr>
+              <tr><td class="ip-cell">443</td><td>TCP</td><td><span class="service-tag tag-https">HTTPS</span></td><td class="version-cell">nginx 1.24.0</td><td class="banner-cell">TLS 1.3 · Certificate: router.local</td></tr>
+              <tr><td class="ip-cell">53</td><td>TCP/UDP</td><td><span class="service-tag tag-dns">DNS</span></td><td class="version-cell">dnsmasq 2.89</td><td class="banner-cell">dnsmasq-2.89 · cache 1024</td></tr>
+              <tr><td class="ip-cell">1900</td><td>UDP</td><td><span class="service-tag tag-unknown">UPnP</span></td><td class="version-cell">miniupnpd 2.3</td><td class="banner-cell">NOTIFY * HTTP/1.1 · ST: upnp:rootdevice</td></tr>
+            </tbody></table>
+          </div>
+        </div>
+
+        <div class="device-section">
+          <div class="device-header">
+            <span class="ip">192.168.1.42</span>
+            <span class="hostname">nas-home.local</span>
+            <span class="tag-deep">深度扫描</span>
+            <span class="os">🖥️ TrueNAS Scale</span>
+            <span class="open-count">8 个端口开放</span>
+          </div>
+          <div class="table-wrap">
+            <table><thead><tr><th>端口</th><th>协议</th><th>服务</th><th>版本</th><th>Banner</th></tr></thead>
+            <tbody>
+              <tr><td class="ip-cell">22</td><td>TCP</td><td><span class="service-tag tag-ssh">SSH</span></td><td class="version-cell">OpenSSH 9.2p1 Debian 2</td><td class="banner-cell">SSH-2.0-OpenSSH_9.2p1 Debian-2</td></tr>
+              <tr><td class="ip-cell">80</td><td>TCP</td><td><span class="service-tag tag-http">HTTP</span></td><td class="version-cell">nginx 1.25.3</td><td class="banner-cell">HTTP/1.1 302 · Location: /ui/</td></tr>
+              <tr><td class="ip-cell">443</td><td>TCP</td><td><span class="service-tag tag-https">HTTPS</span></td><td class="version-cell">nginx 1.25.3</td><td class="banner-cell">TLS 1.3 · nas-home.local</td></tr>
+              <tr><td class="ip-cell">3306</td><td>TCP</td><td><span class="service-tag tag-mysql">MySQL</span></td><td class="version-cell">MySQL 8.0.35</td><td class="banner-cell">8.0.35 · protocol 10 · handshake</td></tr>
+              <tr><td class="ip-cell">6379</td><td>TCP</td><td><span class="service-tag tag-redis">Redis</span></td><td class="version-cell">Redis 7.2.4</td><td class="banner-cell">+OK · redis_version:7.2.4</td></tr>
+              <tr><td class="ip-cell">445</td><td>TCP</td><td><span class="service-tag tag-smb">SMB</span></td><td class="version-cell">Samba 4.18.9</td><td class="banner-cell">SMB v3.1.1 · Share: /mnt/data</td></tr>
+            </tbody></table>
+          </div>
+        </div>
+
+        <div class="summary">
+          <div class="summary-item"><div class="num">3</div><div class="label">在线主机</div></div>
+          <div class="summary-item"><div class="num">16</div><div class="label">开放端口</div></div>
+          <div class="summary-item"><div class="num">10</div><div class="label">服务识别</div></div>
+          <div class="summary-item"><div class="num">47s</div><div class="label">扫描耗时</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Port selection modal -->
+<div id="portModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>选择扫描端口</h2>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+
+    <!-- Quick manual input -->
+    <div class="quick-input">
+      <input id="manualPortInput" type="text" placeholder="手动输入端口号，用逗号分隔 (e.g. 22,80,443,8080)" onkeydown="if(event.key==='Enter')addManual()" />
+      <button class="btn btn-primary btn-sm" onclick="addManual()">添加</button>
+    </div>
+
+    <div class="modal-body">
+      <!-- Search -->
+      <div style="position:relative">
+        <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:#bbb;font-size:14px;">🔍</span>
+        <input class="search-ports" type="text" placeholder="搜索服务名称或端口号..." oninput="filterPorts(this.value)" style="padding-left:32px" />
+      </div>
+
+      <!-- Categories -->
+      <div id="portList">
+        <div class="category">
+          <div class="category-header" onclick="toggleCat(this)">
+            <span class="arrow open">▶</span> Web 服务器
+            <span class="count">6</span>
+          </div>
+          <div class="category-grid open" data-cat="web">
+            <div class="port-option" data-port="80" data-service="HTTP"><span class="check">✓</span><span class="pnum">80</span><span class="pname">HTTP · Web 服务</span></div>
+            <div class="port-option" data-port="443" data-service="HTTPS"><span class="check"></span><span class="pnum">443</span><span class="pname">HTTPS · 加密 Web</span></div>
+            <div class="port-option" data-port="8080" data-service="HTTP-Alt"><span class="check"></span><span class="pnum">8080</span><span class="pname">HTTP 备用 / Tomcat</span></div>
+            <div class="port-option" data-port="8443" data-service="HTTPS-Alt"><span class="check"></span><span class="pnum">8443</span><span class="pname">HTTPS 备用 / Tomcat SSL</span></div>
+            <div class="port-option" data-port="3000" data-service="Dev"><span class="check"></span><span class="pnum">3000</span><span class="pname">Node.js / React 开发</span></div>
+            <div class="port-option" data-port="5000" data-service="Flask"><span class="check"></span><span class="pnum">5000</span><span class="pname">Flask / Python Web</span></div>
+          </div>
+        </div>
+
+        <div class="category">
+          <div class="category-header" onclick="toggleCat(this)">
+            <span class="arrow open">▶</span> 数据库
+            <span class="count">8</span>
+          </div>
+          <div class="category-grid open" data-cat="db">
+            <div class="port-option" data-port="3306" data-service="MySQL"><span class="check">✓</span><span class="pnum">3306</span><span class="pname">MySQL / MariaDB</span></div>
+            <div class="port-option" data-port="5432" data-service="PostgreSQL"><span class="check">✓</span><span class="pnum">5432</span><span class="pname">PostgreSQL</span></div>
+            <div class="port-option" data-port="1433" data-service="MSSQL"><span class="check"></span><span class="pnum">1433</span><span class="pname">Microsoft SQL Server</span></div>
+            <div class="port-option" data-port="1521" data-service="Oracle"><span class="check"></span><span class="pnum">1521</span><span class="pname">Oracle Database</span></div>
+            <div class="port-option" data-port="27017" data-service="MongoDB"><span class="check"></span><span class="pnum">27017</span><span class="pname">MongoDB</span></div>
+            <div class="port-option" data-port="6379" data-service="Redis"><span class="check">✓</span><span class="pnum">6379</span><span class="pname">Redis</span></div>
+            <div class="port-option" data-port="9200" data-service="Elasticsearch"><span class="check"></span><span class="pnum">9200</span><span class="pname">Elasticsearch</span></div>
+            <div class="port-option" data-port="11211" data-service="Memcached"><span class="check"></span><span class="pnum">11211</span><span class="pname">Memcached</span></div>
+          </div>
+        </div>
+
+        <div class="category">
+          <div class="category-header" onclick="toggleCat(this)">
+            <span class="arrow open">▶</span> 远程访问 & Shell
+            <span class="count">4</span>
+          </div>
+          <div class="category-grid open" data-cat="remote">
+            <div class="port-option" data-port="22" data-service="SSH"><span class="check">✓</span><span class="pnum">22</span><span class="pname">SSH · 安全 Shell</span></div>
+            <div class="port-option" data-port="23" data-service="Telnet"><span class="check"></span><span class="pnum">23</span><span class="pname">Telnet · 远程登录</span></div>
+            <div class="port-option" data-port="3389" data-service="RDP"><span class="check"></span><span class="pnum">3389</span><span class="pname">RDP · 远程桌面</span></div>
+            <div class="port-option" data-port="5900" data-service="VNC"><span class="check"></span><span class="pnum">5900</span><span class="pname">VNC · 虚拟网络计算</span></div>
+          </div>
+        </div>
+
+        <div class="category">
+          <div class="category-header" onclick="toggleCat(this)">
+            <span class="arrow open">▶</span> 文件传输
+            <span class="count">4</span>
+          </div>
+          <div class="category-grid open" data-cat="file">
+            <div class="port-option" data-port="21" data-service="FTP"><span class="check"></span><span class="pnum">21</span><span class="pname">FTP · 文件传输</span></div>
+            <div class="port-option" data-port="20" data-service="FTP-Data"><span class="check"></span><span class="pnum">20</span><span class="pname">FTP · 数据传输</span></div>
+            <div class="port-option" data-port="69" data-service="TFTP"><span class="check"></span><span class="pnum">69</span><span class="pname">TFTP · 简单文件传输</span></div>
+            <div class="port-option" data-port="445" data-service="SMB"><span class="check"></span><span class="pnum">445</span><span class="pname">SMB · 文件共享</span></div>
+          </div>
+        </div>
+
+        <div class="category">
+          <div class="category-header" onclick="toggleCat(this)">
+            <span class="arrow open">▶</span> 邮件服务
+            <span class="count">6</span>
+          </div>
+          <div class="category-grid open" data-cat="mail">
+            <div class="port-option" data-port="25" data-service="SMTP"><span class="check"></span><span class="pnum">25</span><span class="pname">SMTP · 发送邮件</span></div>
+            <div class="port-option" data-port="465" data-service="SMTPS"><span class="check"></span><span class="pnum">465</span><span class="pname">SMTPS · 加密发送</span></div>
+            <div class="port-option" data-port="587" data-service="SMTP-Sub"><span class="check"></span><span class="pnum">587</span><span class="pname">SMTP · 提交端口</span></div>
+            <div class="port-option" data-port="110" data-service="POP3"><span class="check"></span><span class="pnum">110</span><span class="pname">POP3 · 接收邮件</span></div>
+            <div class="port-option" data-port="143" data-service="IMAP"><span class="check"></span><span class="pnum">143</span><span class="pname">IMAP · 邮件同步</span></div>
+            <div class="port-option" data-port="993" data-service="IMAPS"><span class="check"></span><span class="pnum">993</span><span class="pname">IMAPS · 加密同步</span></div>
+          </div>
+        </div>
+
+        <div class="category">
+          <div class="category-header" onclick="toggleCat(this)">
+            <span class="arrow open">▶</span> 网络基础设施
+            <span class="count">6</span>
+          </div>
+          <div class="category-grid open" data-cat="infra">
+            <div class="port-option" data-port="53" data-service="DNS"><span class="check"></span><span class="pnum">53</span><span class="pname">DNS · 域名解析</span></div>
+            <div class="port-option" data-port="67" data-service="DHCP"><span class="check"></span><span class="pnum">67</span><span class="pname">DHCP · 地址分配</span></div>
+            <div class="port-option" data-port="123" data-service="NTP"><span class="check"></span><span class="pnum">123</span><span class="pname">NTP · 网络时间</span></div>
+            <div class="port-option" data-port="161" data-service="SNMP"><span class="check"></span><span class="pnum">161</span><span class="pname">SNMP · 网络管理</span></div>
+            <div class="port-option" data-port="389" data-service="LDAP"><span class="check"></span><span class="pnum">389</span><span class="pname">LDAP · 目录服务</span></div>
+            <div class="port-option" data-port="514" data-service="Syslog"><span class="check"></span><span class="pnum">514</span><span class="pname">Syslog · 系统日志</span></div>
+          </div>
+        </div>
+
+        <div class="category">
+          <div class="category-header" onclick="toggleCat(this)">
+            <span class="arrow open">▶</span> Windows 服务
+            <span class="count">4</span>
+          </div>
+          <div class="category-grid open" data-cat="win">
+            <div class="port-option" data-port="135" data-service="RPC"><span class="check"></span><span class="pnum">135</span><span class="pname">RPC · 远程过程调用</span></div>
+            <div class="port-option" data-port="139" data-service="NetBIOS"><span class="check"></span><span class="pnum">139</span><span class="pname">NetBIOS · 会话服务</span></div>
+            <div class="port-option" data-port="445" data-service="SMB"><span class="check"></span><span class="pnum">445</span><span class="pname">SMB · 文件打印机共享</span></div>
+            <div class="port-option" data-port="3389" data-service="RDP"><span class="check"></span><span class="pnum">3389</span><span class="pname">RDP · 远程桌面</span></div>
+          </div>
+        </div>
+
+        <div class="category">
+          <div class="category-header" onclick="toggleCat(this)">
+            <span class="arrow open">▶</span> 消息 & 中间件
+            <span class="count">3</span>
+          </div>
+          <div class="category-grid open" data-cat="mq">
+            <div class="port-option" data-port="2181" data-service="ZooKeeper"><span class="check"></span><span class="pnum">2181</span><span class="pname">ZooKeeper</span></div>
+            <div class="port-option" data-port="61616" data-service="ActiveMQ"><span class="check"></span><span class="pnum">61616</span><span class="pname">ActiveMQ</span></div>
+            <div class="port-option" data-port="9092" data-service="Kafka"><span class="check"></span><span class="pnum">9092</span><span class="pname">Kafka</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <div class="selected-summary">已选择 <strong id="selectedCount">6</strong> 个端口</div>
+      <div class="modal-actions">
+        <button class="btn btn-sm" style="background:transparent;border:1px solid #ddd;color:#666" onclick="closeModal()">取消</button>
+        <button class="btn btn-primary btn-sm" onclick="confirmPorts()">确认选择</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let selectedPorts = new Set([80, 443, 22, 3306, 5432, 6379]);
+
+function initModal() {
+  document.querySelectorAll('.port-option').forEach(el => {
+    const port = parseInt(el.dataset.port);
+    if (selectedPorts.has(port)) {
+      el.classList.add('selected');
+      el.querySelector('.check').textContent = '✓';
+    }
+  });
+  updateCount();
+}
+initModal();
+
+function toggleCat(header) {
+  const arrow = header.querySelector('.arrow');
+  const grid = header.nextElementSibling;
+  arrow.classList.toggle('open');
+  grid.classList.toggle('open');
+}
+
+function togglePort(el) {
+  const port = parseInt(el.dataset.port);
+  if (selectedPorts.has(port)) {
+    selectedPorts.delete(port);
+    el.classList.remove('selected');
+    el.querySelector('.check').textContent = '';
+  } else {
+    selectedPorts.add(port);
+    el.classList.add('selected');
+    el.querySelector('.check').textContent = '✓';
+  }
+  updateCount();
+}
+
+document.querySelectorAll('.port-option').forEach(el => {
+  el.addEventListener('click', () => togglePort(el));
+});
+
+function addManual() {
+  const input = document.getElementById('manualPortInput');
+  const vals = input.value.trim().split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n) && n > 0 && n <= 65535);
+  vals.forEach(p => selectedPorts.add(p));
+  input.value = '';
+  // Update modal UI
+  document.querySelectorAll('.port-option').forEach(el => {
+    const port = parseInt(el.dataset.port);
+    if (selectedPorts.has(port)) {
+      el.classList.add('selected');
+      el.querySelector('.check').textContent = '✓';
+    }
+  });
+  updateCount();
+}
+
+function filterPorts(query) {
+  const q = query.toLowerCase().trim();
+  document.querySelectorAll('.port-option').forEach(el => {
+    const port = el.dataset.port;
+    const service = el.querySelector('.pname').textContent.toLowerCase();
+    const match = !q || port.includes(q) || service.includes(q);
+    el.style.display = match ? '' : 'none';
+  });
+  document.querySelectorAll('.category').forEach(cat => {
+    const visible = Array.from(cat.querySelectorAll('.port-option')).some(el => el.style.display !== 'none');
+    cat.style.display = visible || !q ? '' : 'none';
+  });
+}
+
+function updateCount() {
+  document.getElementById('selectedCount').textContent = selectedPorts.size;
+}
+
+function confirmPorts() {
+  // Update tags in the main view
+  const container = document.querySelector('.port-tags');
+  const sorted = Array.from(selectedPorts).sort((a,b) => a-b);
+  container.innerHTML = sorted.map(p => `<span class="port-tag">${p} <span class="remove" onclick="removePort(${p})">×</span></span>`).join('');
+  document.getElementById('portModal').style.display = 'none';
+}
+
+function closeModal() {
+  document.getElementById('portModal').style.display = 'none';
+}
+
+function removePort(port) {
+  selectedPorts.delete(port);
+  document.querySelector('.port-tags').querySelectorAll('.port-tag').forEach(el => {
+    if (el.textContent.trim().startsWith(port.toString())) el.remove();
+  });
+  document.querySelectorAll('.port-option').forEach(el => {
+    if (parseInt(el.dataset.port) === port) {
+      el.classList.remove('selected');
+      el.querySelector('.check').textContent = '';
+    }
+  });
+  updateCount();
+}
+</script>
+</body>
+</html>
