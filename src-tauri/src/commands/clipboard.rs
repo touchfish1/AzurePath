@@ -79,31 +79,33 @@ pub async fn clipboard_copy(id: String, app: AppHandle) -> Result<(), String> {
 
     match entry.content_type.as_str() {
         "text" => {
-            if let Some(text) = &entry.text_content {
-                app.clipboard()
-                    .write_text(text)
-                    .map_err(|e| format!("Failed to write text to clipboard: {}", e))?;
-            }
+            let text = entry.text_content.as_ref()
+                .ok_or("Text entry has no text_content")?;
+            app.clipboard()
+                .write_text(text)
+                .map_err(|e| format!("Failed to write text to clipboard: {}", e))?;
         }
         "image" => {
-            if let Some(path) = &entry.image_path {
-                let raw = std::fs::read(path)
-                    .map_err(|e| format!("Failed to read image: {}", e))?;
+            let path = entry.image_path.as_ref()
+                .ok_or("Image entry has no image_path")?;
+            let raw = std::fs::read(path)
+                .map_err(|e| format!("Failed to read image: {}", e))?;
 
-                // Derive metadata path from the image path
-                let meta_path = std::path::Path::new(path).with_extension("json");
-                let meta_content = std::fs::read_to_string(&meta_path)
-                    .map_err(|e| format!("Failed to read image metadata: {}", e))?;
-                let meta: serde_json::Value = serde_json::from_str(&meta_content)
-                    .map_err(|e| format!("Failed to parse image metadata: {}", e))?;
-                let width = meta["width"].as_u64().unwrap_or(0) as u32;
-                let height = meta["height"].as_u64().unwrap_or(0) as u32;
+            // Derive metadata path from the image path
+            let meta_path = std::path::Path::new(path).with_extension("json");
+            let meta_content = std::fs::read_to_string(&meta_path)
+                .map_err(|e| format!("Failed to read image metadata: {}", e))?;
+            let meta: serde_json::Value = serde_json::from_str(&meta_content)
+                .map_err(|e| format!("Failed to parse image metadata: {}", e))?;
+            let width = meta["width"].as_u64()
+                .ok_or("Missing width in image metadata")? as u32;
+            let height = meta["height"].as_u64()
+                .ok_or("Missing height in image metadata")? as u32;
 
-                let image = Image::new_owned(raw, width, height);
-                app.clipboard()
-                    .write_image(&image)
-                    .map_err(|e| format!("Failed to write image to clipboard: {}", e))?;
-            }
+            let image = Image::new_owned(raw, width, height);
+            app.clipboard()
+                .write_image(&image)
+                .map_err(|e| format!("Failed to write image to clipboard: {}", e))?;
         }
         "file" => {
             eprintln!("[clipboard] write_files not supported by clipboard plugin; skipping");
