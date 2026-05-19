@@ -25,6 +25,7 @@ import {
   type FileTransfer,
 } from "@/lib/tauri";
 import type { UnlistenFn } from "@tauri-apps/api/event";
+import { open } from "@tauri-apps/plugin-dialog";
 
 const peers = ref<PeerInfo[]>([]);
 const messages = ref<StoredMessage[]>([]);
@@ -191,6 +192,35 @@ async function sendMessage() {
     console.error("Failed to send message:", e);
   } finally {
     sending.value = false;
+  }
+}
+
+async function pickFile() {
+  try {
+    const selected = await open({
+      multiple: false,
+      title: "选择文件",
+    });
+    if (selected) {
+      filePath.value = selected as string;
+    }
+  } catch (e) {
+    console.error("Failed to pick file:", e);
+  }
+}
+
+async function pickFolder() {
+  try {
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      title: "选择文件夹",
+    });
+    if (selected) {
+      filePath.value = selected as string;
+    }
+  } catch (e) {
+    console.error("Failed to pick folder:", e);
   }
 }
 
@@ -430,12 +460,21 @@ function statusClass(status: string): string {
             <div class="flex items-end gap-2">
               <div class="flex-1">
                 <label class="mb-1 block text-xs font-medium text-ink-soft">文件路径</label>
-                <input
-                  v-model="filePath"
-                  placeholder="输入文件完整路径..."
-                  class="w-full rounded-lg border border-paper-deep bg-paper-warm/50 px-3 py-2 text-sm text-ink placeholder:text-ink-faint/50 outline-none transition-colors focus:border-bamboo/50 focus:ring-1 focus:ring-bamboo/20"
-                  @keydown.enter="sendFileMessage"
-                />
+                <div class="flex gap-2">
+                  <input
+                    v-model="filePath"
+                    placeholder="选择文件或输入路径..."
+                    readonly
+                    class="w-full rounded-lg border border-paper-deep bg-paper-warm/50 px-3 py-2 text-sm text-ink placeholder:text-ink-faint/50 outline-none cursor-pointer"
+                    @click="pickFile"
+                  />
+                  <Button variant="secondary" size="sm" @click="pickFile">
+                    选择文件
+                  </Button>
+                  <Button variant="ghost" size="sm" @click="pickFolder">
+                    选择文件夹
+                  </Button>
+                </div>
               </div>
               <Button
                 variant="outline"
