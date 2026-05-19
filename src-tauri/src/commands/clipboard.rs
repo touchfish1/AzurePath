@@ -29,6 +29,7 @@ pub async fn clipboard_start(app: AppHandle) -> Result<(), String> {
     let monitor = ClipboardMonitor::new(store.clone());
     monitor.set_app(app.clone()).await;
     monitor.seed_last_hash().await;
+    monitor.load_interval().await;
 
     CLIPBOARD_STORE
         .set(store)
@@ -121,6 +122,23 @@ pub async fn clipboard_copy(id: String, app: AppHandle) -> Result<(), String> {
 pub async fn clipboard_clear() -> Result<(), String> {
     let store = CLIPBOARD_STORE.get().ok_or("Clipboard not initialized")?;
     store.clear()
+}
+
+#[tauri::command]
+pub async fn clipboard_get_interval() -> Result<u64, String> {
+    let monitor = CLIPBOARD_MONITOR.get().ok_or("Clipboard not initialized")?;
+    Ok(monitor.get_interval_ms())
+}
+
+#[tauri::command]
+pub async fn clipboard_set_interval(ms: u64) -> Result<(), String> {
+    let monitor = CLIPBOARD_MONITOR.get().ok_or("Clipboard not initialized")?;
+    if ms < 200 || ms > 60000 {
+        return Err("Interval must be between 200ms and 60000ms".to_string());
+    }
+    monitor.set_interval_ms(ms);
+    println!("[clipboard] Interval set to {}ms", ms);
+    Ok(())
 }
 
 /// Handle incoming ClipboardSync frames from LAN peers.

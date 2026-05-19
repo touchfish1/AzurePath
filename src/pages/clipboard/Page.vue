@@ -10,6 +10,8 @@ import {
   clipboardToggleFavorite,
   clipboardCopy,
   clipboardClear,
+  clipboardGetInterval,
+  clipboardSetInterval,
   onClipboardNew,
   type ClipboardEntry,
 } from "@/lib/tauri";
@@ -19,6 +21,7 @@ const entries = ref<ClipboardEntry[]>([]);
 const searchQuery = ref("");
 const loading = ref(true);
 const copiedId = ref<string | null>(null);
+const intervalMs = ref(1000);
 let unlistenNew: UnlistenFn | null = null;
 
 const filteredEntries = computed(() => {
@@ -36,6 +39,12 @@ onMounted(async () => {
     console.error("Failed to start clipboard:", e);
   }
   await loadEntries();
+
+  try {
+    intervalMs.value = await clipboardGetInterval();
+  } catch (e) {
+    console.error("Failed to get interval:", e);
+  }
 
   try {
     unlistenNew = await onClipboardNew((entry) => {
@@ -100,6 +109,23 @@ async function clearAll() {
     console.error("Failed to clear:", e);
   }
 }
+
+async function changeInterval(ms: number) {
+  try {
+    await clipboardSetInterval(ms);
+    intervalMs.value = ms;
+  } catch (e) {
+    console.error("Failed to set interval:", e);
+  }
+}
+
+const intervalOptions = [
+  { label: "0.5s", value: 500 },
+  { label: "1s", value: 1000 },
+  { label: "2s", value: 2000 },
+  { label: "3s", value: 3000 },
+  { label: "5s", value: 5000 },
+];
 
 function formatTime(iso: string): string {
   try {
@@ -215,8 +241,22 @@ function typeIcon(type: string) {
     </div>
 
     <!-- Footer -->
-    <div class="border-t border-paper-deep/50 px-6 py-2 text-xs text-ink-faint">
-      {{ entries.length }} 条记录 · 自动监听中
+    <div class="border-t border-paper-deep/50 px-6 py-2 text-xs text-ink-faint flex items-center justify-between">
+      <span>{{ entries.length }} 条记录 · 自动监听中</span>
+      <div class="flex items-center gap-2">
+        <span class="text-ink-faint/70">检测间隔:</span>
+        <div class="flex gap-1">
+          <button
+            v-for="opt in intervalOptions"
+            :key="opt.value"
+            class="rounded px-2 py-0.5 transition-colors"
+            :class="intervalMs === opt.value ? 'bg-bamboo/20 text-bamboo' : 'hover:bg-paper-deep/50 text-ink-faint'"
+            @click="changeInterval(opt.value)"
+          >
+            {{ opt.label }}
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </template>

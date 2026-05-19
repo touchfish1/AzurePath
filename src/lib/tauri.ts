@@ -435,3 +435,11 @@ export function clipboardClear(): Promise<void> {
 export function onClipboardNew(cb: (entry: ClipboardEntry) => void): Promise<UnlistenFn> {
   return listen<ClipboardEntry>("clipboard:new", (event) => cb(event.payload));
 }
+
+export function clipboardGetInterval(): Promise<number> {
+  return invoke<number>("clipboard_get_interval");
+}
+
+export function clipboardSetInterval(ms: number): Promise<void> {
+  return invoke<void>("clipboard_set_interval", { ms });
+}

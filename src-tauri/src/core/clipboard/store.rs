@@ -47,9 +47,37 @@ impl ClipboardStore {
             CREATE INDEX IF NOT EXISTS idx_clipboard_created ON clipboard_entries(created_at);
             CREATE INDEX IF NOT EXISTS idx_clipboard_favorite ON clipboard_entries(is_favorite);
             CREATE INDEX IF NOT EXISTS idx_clipboard_hash ON clipboard_entries(content_hash);
+            CREATE TABLE IF NOT EXISTS clipboard_settings (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
             ",
         )
         .map_err(|e| format!("Failed to init clipboard tables: {}", e))?;
+        Ok(())
+    }
+
+    pub fn get_setting(&self, key: &str) -> Result<Option<String>, String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare("SELECT value FROM clipboard_settings WHERE key = ?1")
+            .map_err(|e| format!("Failed to prepare: {}", e))?;
+        let mut rows = stmt
+            .query_map(params![key], |row| row.get::<_, String>(0))
+            .map_err(|e| format!("Failed to query: {}", e))?;
+        match rows.next() {
+            Some(Ok(val)) => Ok(Some(val)),
+            _ => Ok(None),
+        }
+    }
+
+    pub fn set_setting(&self, key: &str, value: &str) -> Result<(), String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        conn.execute(
+            "INSERT OR REPLACE INTO clipboard_settings (key, value) VALUES (?1, ?2)",
+            params![key, value],
+        )
+        .map_err(|e| format!("Failed to set setting: {}", e))?;
         Ok(())
     }
 

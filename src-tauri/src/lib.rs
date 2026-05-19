@@ -40,6 +40,8 @@ pub fn run() {
             commands::clipboard::clipboard_toggle_favorite,
             commands::clipboard::clipboard_copy,
             commands::clipboard::clipboard_clear,
+            commands::clipboard::clipboard_get_interval,
+            commands::clipboard::clipboard_set_interval,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

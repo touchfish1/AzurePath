@@ -3,11 +3,13 @@ use crate::types::clipboard::ClipboardEntry;
 use crate::types::clipboard::MAX_CLIPBOARD_BYTES;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tokio::sync::Mutex;
 use uuid::Uuid;
+
+pub const DEFAULT_INTERVAL_MS: u64 = 1000;
 
 enum ClipboardContent {
     Text {
@@ -25,6 +27,7 @@ enum ClipboardContent {
 pub struct ClipboardMonitor {
     store: Arc<ClipboardStore>,
     running: Arc<AtomicBool>,
+    interval_ms: Arc<AtomicU64>,
     last_hash: Arc<Mutex<String>>,
     app: Arc<Mutex<Option<AppHandle>>>,
 }
@@ -34,9 +37,30 @@ impl ClipboardMonitor {
         Self {
             store,
             running: Arc::new(AtomicBool::new(false)),
+            interval_ms: Arc::new(AtomicU64::new(DEFAULT_INTERVAL_MS)),
             last_hash: Arc::new(Mutex::new(String::new())),
             app: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Load the persisted interval from settings, or use default.
+    pub async fn load_interval(&self) {
+        let saved = self.store.get_setting("clipboard_interval_ms").ok().flatten();
+        if let Some(val) = saved {
+            if let Ok(ms) = val.parse::<u64>() {
+                self.interval_ms.store(ms, Ordering::Release);
+            }
+        }
+    }
+
+    pub fn get_interval_ms(&self) -> u64 {
+        self.interval_ms.load(Ordering::Acquire)
+    }
+
+    /// Update interval at runtime and persist to settings.
+    pub fn set_interval_ms(&self, ms: u64) {
+        self.interval_ms.store(ms, Ordering::Release);
+        let _ = self.store.set_setting("clipboard_interval_ms", &ms.to_string());
     }
 
     pub async fn set_app(&self, app: AppHandle) {
@@ -60,17 +84,15 @@ impl ClipboardMonitor {
         }
 
         let running = self.running.clone();
+        let interval_ms = self.interval_ms.clone();
         let last_hash = self.last_hash.clone();
         let store = self.store.clone();
         let app_lock = self.app.clone();
 
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(500));
-            // Skip the first immediate tick so the first poll happens after 1.5s
-            interval.tick().await;
-
             while running.load(Ordering::SeqCst) {
-                interval.tick().await;
+                let ms = interval_ms.load(Ordering::Acquire);
+                tokio::time::sleep(tokio::time::Duration::from_millis(ms)).await;
 
                 let app_handle = {
                     let guard = app_lock.lock().await;
