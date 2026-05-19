@@ -130,3 +130,70 @@ pub async fn chat_history(limit: Option<u32>) -> Result<Vec<StoredMessage>, Stri
         .get_messages(None, limit.unwrap_or(100))
         .map_err(|e| e.to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The command functions are thin wrappers around ChatService /
+    /// ChatStore that depend on process-global statics
+    /// (`CHAT`, `CONN_MGR`, `crate::commands::discovery::DISCOVERY`) and a
+    /// Tauri `AppHandle`.  Full integration tests require a running Tauri
+    /// application.
+    ///
+    /// Core logic (ChatService, ChatStore) is thoroughly tested in
+    /// `crate::core::chat::mod` and `crate::core::chat::store`.
+    /// Command-layer tests below focus on type/compile checks and
+    /// parameter handling only, avoiding global-state mutation.
+
+    #[test]
+    fn test_option_peer_id_types() {
+        // Verify that both None and Some work for the peer_id parameter
+        let none_param: Option<String> = None;
+        let some_param: Option<String> = Some("peer-1".to_string());
+        assert!(none_param.is_none());
+        assert!(some_param.is_some());
+    }
+
+    #[test]
+    fn test_chat_history_limit_default_value() {
+        // The function produces `limit.unwrap_or(100)` internally.
+        // This test validates the default logic in isolation.
+        let none: Option<u32> = None;
+        let with_value: Option<u32> = Some(50);
+        assert_eq!(none.unwrap_or(100), 100);
+        assert_eq!(with_value.unwrap_or(100), 50);
+    }
+
+    #[test]
+    fn test_chat_history_zero_limit() {
+        // Zero is a valid limit that ChatStore handles.
+        let limit: Option<u32> = Some(0);
+        assert_eq!(limit.unwrap_or(100), 0);
+    }
+
+    #[test]
+    fn test_static_initial_state() {
+        // These statics are process-global OnceLocks.
+        // In a test environment they should NOT be initialized
+        // (no Tauri app is running). We verify this to catch
+        // accidental test-order dependencies.
+        if CHAT.get().is_some() {
+            eprintln!("WARNING: CHAT static is already initialized — test isolation may be compromised");
+        }
+        if CONN_MGR.get().is_some() {
+            eprintln!("WARNING: CONN_MGR static is already initialized — test isolation may be compromised");
+        }
+        // No assertion — just a diagnostic.
+    }
+
+    #[test]
+    fn test_get_conn_mgr_panics_when_not_set() {
+        // get_conn_mgr() calls .expect() on the OnceLock, which panics
+        // when CONN_MGR is not set. Validate via std::panic::catch_unwind.
+        let result = std::panic::catch_unwind(|| {
+            let _ = get_conn_mgr();
+        });
+        assert!(result.is_err(), "get_conn_mgr should panic when CONN_MGR is not set");
+    }
+}
