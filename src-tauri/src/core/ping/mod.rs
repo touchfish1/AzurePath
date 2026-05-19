@@ -156,7 +156,7 @@ fn extract_latency_ms(line: &str) -> f64 {
     for i in (1..bytes.len().saturating_sub(1)).rev() {
         if bytes[i] == b'm' && bytes[i + 1] == b's' {
             // Walk backwards to find the start of the number
-            let mut end = i;
+            let end = i;
             let mut start = end;
             while start > 0
                 && (bytes[start - 1].is_ascii_digit() || bytes[start - 1] == b'.')

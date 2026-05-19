@@ -119,6 +119,12 @@ impl ConnectionManager {
             conns.insert(peer_id.clone(), conn);
         }
 
+        // Notify other peers about the new connection
+        self.broadcast(&Frame::System {
+            content: format!("peer {} is online", peer_id),
+        })
+        .await;
+
         // Spawn read loop
         self.spawn_read_loop(peer_id.clone(), reader);
     }
@@ -162,6 +168,12 @@ impl ConnectionManager {
             let mut conns = self.connections.lock().await;
             conns.insert(peer_id.clone(), conn);
         }
+
+        // Notify other peers about the new connection
+        self.broadcast(&Frame::System {
+            content: format!("peer {} is online", peer_id),
+        })
+        .await;
 
         self.spawn_read_loop(peer_id.clone(), reader);
 
@@ -213,10 +225,16 @@ impl ConnectionManager {
                 }
             }
 
+            // Notify remaining peers about disconnect (broadcast before removing)
+            this.broadcast(&Frame::System {
+                content: format!("peer {} is offline", peer_id),
+            })
+            .await;
+
             // Cleanup connection on disconnect
             let mut conns = this.connections.lock().await;
             conns.remove(&peer_id);
-            // Notify offline
+            // Notify via internal channel
             let _ = frame_tx.send(IncomingFrame {
                 peer_id: format!("__disconnected:{}", peer_id),
                 frame: Frame::System {

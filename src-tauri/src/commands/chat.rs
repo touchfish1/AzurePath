@@ -32,13 +32,32 @@ pub async fn chat_init(app: AppHandle) -> Result<(), String> {
                         let _ = app_clone.emit("chat:message", &stored);
                     }
 
-                    // Handle system messages (peer disconnect)
-                    if matches!(&incoming.frame, crate::types::chat::Frame::System { .. }) {
+                    // Handle system messages
+                    if let crate::types::chat::Frame::System { content } = &incoming.frame {
                         if incoming.peer_id.starts_with("__disconnected:") {
                             let peer_id = incoming.peer_id.trim_start_matches("__disconnected:");
+                            // Mark peer offline in the peer table
+                            if let Some(d) = crate::commands::discovery::DISCOVERY.get() {
+                                d.peer_table().mark_offline(peer_id).await;
+                            }
                             let _ = app_clone.emit("peer:offline", serde_json::json!({
                                 "id": peer_id,
                             }));
+                        } else {
+                            // System message from a remote peer — show as chat message
+                            let sys_msg = crate::types::chat::StoredMessage {
+                                id: uuid::Uuid::new_v4().to_string(),
+                                peer_id: incoming.peer_id.clone(),
+                                peer_name: "系统".to_string(),
+                                peer_ip: "".to_string(),
+                                peer_os: None,
+                                content: format!("🔔 {}", content),
+                                is_broadcast: true,
+                                is_incoming: true,
+                                file_ref: None,
+                                created_at: chrono::Utc::now().to_rfc3339(),
+                            };
+                            let _ = app_clone.emit("chat:message", &sys_msg);
                         }
                     }
 

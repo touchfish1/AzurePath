@@ -13,10 +13,13 @@ pub async fn lan_init(app: AppHandle) -> Result<(), String> {
     // 2. Start file transfer service (receiver on dynamic port)
     crate::commands::file_transfer::file_transfer_init(app.clone()).await?;
 
-    // 3. Start chat service (subscribes to connection frames)
+    // 3. Wire connection manager into file transfer service for progress reporting
+    crate::commands::file_transfer::set_file_conn_mgr(conn_mgr.clone());
+
+    // 4. Start chat service (subscribes to connection frames)
     crate::commands::chat::chat_init(app.clone()).await?;
 
-    // 4. Start discovery service (UDP broadcast + heartbeat)
+    // 5. Start discovery service (UDP broadcast + heartbeat)
     //    This also triggers connection to discovered peers.
     crate::commands::discovery::discovery_start(app.clone()).await?;
 

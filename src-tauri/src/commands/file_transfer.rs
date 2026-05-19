@@ -1,9 +1,11 @@
 use crate::core::connection::IncomingFrame;
-use crate::core::file_transfer::FileTransferService;
+use crate::core::file_transfer::{FileResponseInfo, FileTransferService};
 use crate::types::file_transfer::FileTransfer;
 use std::sync::OnceLock;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
+use tokio::sync::oneshot;
+use uuid::Uuid;
 
 static FILE_SVC: OnceLock<Arc<FileTransferService>> = OnceLock::new();
 
@@ -19,19 +21,30 @@ pub(crate) async fn handle_frame(incoming: &IncomingFrame, app: &AppHandle) {
             file_id,
             filename,
             size,
-            from,
+            from: _,
         } => {
-            // Store incoming request info; frontend will decide to accept/reject
-            svc.register_incoming(file_id, filename, *size, from).await;
+            // Remember which peer sent this request (for routing file_accept back)
+            svc.register_request_sender(file_id, &incoming.peer_id).await;
+            svc.register_incoming(file_id, filename, *size, &incoming.peer_id).await;
             let _ = app.emit(
                 "file:request",
                 serde_json::json!({
                     "fileId": file_id,
                     "filename": filename,
                     "size": size,
-                    "from": from,
+                    "from": incoming.peer_id,
                 }),
             );
+        }
+        crate::types::chat::Frame::FileResponse {
+            file_id,
+            accepted,
+            data_port,
+        } => {
+            // Route the response to the waiting sender task
+            let accepted = *accepted;
+            let data_port = *data_port;
+            let _ = svc.deliver_response(file_id, FileResponseInfo { accepted, data_port }).await;
         }
         crate::types::chat::Frame::FileProgress {
             file_id,
@@ -93,6 +106,12 @@ pub async fn file_transfer_init(_app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+pub(crate) fn set_file_conn_mgr(mgr: Arc<crate::core::connection::ConnectionManager>) {
+    if let Some(svc) = FILE_SVC.get() {
+        svc.set_conn_mgr(mgr);
+    }
+}
+
 #[tauri::command]
 pub async fn file_send(
     target: String,
@@ -102,8 +121,8 @@ pub async fn file_send(
 
     // Get file metadata
     let file_path = std::path::PathBuf::from(&path);
-    let metadata = std::fs::metadata(&file_path)
-        .map_err(|e| format!("Cannot read file: {}", e))?;
+    let metadata =
+        std::fs::metadata(&file_path).map_err(|e| format!("Cannot read file: {}", e))?;
     let file_size = metadata.len();
     let filename = file_path
         .file_name()
@@ -111,7 +130,7 @@ pub async fn file_send(
         .ok_or("Invalid filename")?
         .to_string();
 
-    // Get peer info for the receiver port
+    // Get peer info
     let peer = match crate::commands::discovery::DISCOVERY.get() {
         Some(d) => d.get_peer(&target).await,
         None => None,
@@ -121,22 +140,24 @@ pub async fn file_send(
         .map(|p| p.ip.clone())
         .unwrap_or_else(|| "unknown".to_string());
 
-    let receiver_port = match svc.get_receiver_port().await {
-        Some(p) => p,
-        None => return Err("File receiver not ready".to_string()),
-    };
-
-    // Send file request via chat connection
     let conn_mgr = match crate::commands::chat::CONN_MGR.get() {
         Some(c) => c,
         None => return Err("Connection manager not initialized".to_string()),
     };
 
+    // Generate real file_id
+    let file_id = Uuid::new_v4().to_string();
+
+    // Create oneshot channel for the response
+    let (tx, rx) = oneshot::channel::<FileResponseInfo>();
+    svc.register_pending_response(&file_id, tx).await;
+
+    // Send FileRequest to the specific peer
     conn_mgr
         .send(
             &target,
             &crate::types::chat::Frame::FileRequest {
-                file_id: "pending".to_string(),
+                file_id: file_id.clone(),
                 filename: filename.clone(),
                 size: file_size,
                 from: crate::core::discovery::my_id().await,
@@ -144,35 +165,61 @@ pub async fn file_send(
         )
         .await?;
 
-    // Initiate the actual transfer
-    svc.initiate_transfer(
-        &target,
-        &peer_addr,
-        receiver_port,
-        &path,
-        filename,
-        file_size,
+    // Wait for FileResponse with timeout
+    let response = tokio::time::timeout(
+        tokio::time::Duration::from_secs(30),
+        rx,
     )
     .await
+    .map_err(|_| "File request timed out (no response in 30s)".to_string())?
+    .map_err(|_| "File response channel closed".to_string())?;
+
+    if !response.accepted {
+        return Err("File transfer rejected by peer".to_string());
+    }
+
+    // Start the actual data transfer
+    svc.start_transfer_after_response(
+        &file_id,
+        &peer_addr,
+        response.data_port,
+        &path,
+        &filename,
+        file_size,
+        &target,
+    )
+    .await;
+
+    Ok(file_id)
 }
 
 #[tauri::command]
 pub async fn file_accept(file_id: String, receiver_port: u16) -> Result<(), String> {
-    // Send file_response with accept=true via chat connection
     let conn_mgr = match crate::commands::chat::CONN_MGR.get() {
         Some(c) => c,
         None => return Err("Connection manager not initialized".to_string()),
     };
 
-    // We need to know which peer sent this file request.
-    // For now, broadcast the response (the sender will recognize its file_id).
+    // Look up which peer sent this request
+    let svc = FILE_SVC.get().ok_or("File transfer not initialized")?;
+    let sender_peer = svc
+        .get_request_sender(&file_id)
+        .await
+        .ok_or("Unknown file request")?;
+
+    svc.remove_request_sender(&file_id).await;
+
+    // Send FileResponse only to the requesting peer
     conn_mgr
-        .broadcast(&crate::types::chat::Frame::FileResponse {
-            file_id,
-            accepted: true,
-            data_port: receiver_port,
-        })
-        .await;
+        .send(
+            &sender_peer,
+            &crate::types::chat::Frame::FileResponse {
+                file_id,
+                accepted: true,
+                data_port: receiver_port,
+            },
+        )
+        .await?;
 
     Ok(())
 }
@@ -184,13 +231,24 @@ pub async fn file_reject(file_id: String) -> Result<(), String> {
         None => return Err("Connection manager not initialized".to_string()),
     };
 
+    let svc = FILE_SVC.get().ok_or("File transfer not initialized")?;
+    let sender_peer = svc
+        .get_request_sender(&file_id)
+        .await
+        .ok_or("Unknown file request")?;
+
+    svc.remove_request_sender(&file_id).await;
+
     conn_mgr
-        .broadcast(&crate::types::chat::Frame::FileResponse {
-            file_id,
-            accepted: false,
-            data_port: 0,
-        })
-        .await;
+        .send(
+            &sender_peer,
+            &crate::types::chat::Frame::FileResponse {
+                file_id,
+                accepted: false,
+                data_port: 0,
+            },
+        )
+        .await?;
 
     Ok(())
 }
