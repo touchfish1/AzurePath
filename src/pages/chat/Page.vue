@@ -206,6 +206,9 @@ onMounted(async () => {
 
   unlistenMessage = await onChatMessage((msg) => {
     messages.value.push(msg);
+    if (messages.value.length > 2000) {
+      messages.value = messages.value.slice(-1000);
+    }
     // Send system notification when window is not focused
     if (!document.hasFocus()) {
       sendSystemNotification(
@@ -306,6 +309,9 @@ async function sendFileMessage() {
     is_incoming: false,
     created_at: new Date().toISOString(),
   });
+  if (transfers.value.length > 200) {
+    transfers.value = transfers.value.slice(0, 100);
+  }
 
   try {
     let result: FileSendResult;

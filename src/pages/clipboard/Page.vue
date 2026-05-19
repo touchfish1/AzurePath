@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from "vue";
-import { useVirtualList } from "@vueuse/core";
+import { useVirtualList, useDebounceFn } from "@vueuse/core";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { Search, Trash2, Star, Copy, FileText, Image, File, X, ArrowUp, ArrowDown, Download, CheckSquare, Square } from "lucide-vue-next";
 import Button from "@/components/ui/button/Button.vue";
@@ -29,6 +29,9 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 
 const entries = ref<ClipboardEntry[]>([]);
 const searchQuery = ref("");
+const debouncedSearchQuery = ref("");
+const searchDebounced = useDebounceFn((v: string) => { debouncedSearchQuery.value = v; }, 250);
+watch(searchQuery, (v) => searchDebounced(v));
 const loading = ref(true);
 const copiedId = ref<string | null>(null);
 const intervalMs = ref(1000);
@@ -103,8 +106,8 @@ const filteredEntries = computed(() => {
   }
 
   // Search filter
-  if (searchQuery.value.trim()) {
-    const q = searchQuery.value.toLowerCase();
+  if (debouncedSearchQuery.value.trim()) {
+    const q = debouncedSearchQuery.value.toLowerCase();
     result = result.filter(
       (e) => e.text_content?.toLowerCase().includes(q)
     );

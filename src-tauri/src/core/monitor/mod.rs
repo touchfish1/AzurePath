@@ -245,7 +245,7 @@ pub fn start_monitoring(app: tauri::AppHandle) -> Result<(), String> {
     // Stop any existing monitoring first
     stop_monitoring();
 
-    let store = MonitorStore::new()?;
+    let store = Arc::new(MonitorStore::new()?);
     let targets = store.get_enabled_targets()?;
     if targets.is_empty() {
         return Err("No enabled monitoring targets configured".to_string());
@@ -267,6 +267,7 @@ pub fn start_monitoring(app: tauri::AppHandle) -> Result<(), String> {
     for target in targets {
         let cancel = cancel.clone();
         let app_clone = app.clone();
+        let store = store.clone();
         let interval = std::time::Duration::from_secs(target.interval_secs);
         let target_id = target.id.clone();
         let target_host = target.host.clone();
@@ -276,6 +277,7 @@ pub fn start_monitoring(app: tauri::AppHandle) -> Result<(), String> {
             // Do an initial ping immediately
             ping_target_and_report(
                 &app_clone,
+                &store,
                 &target_id,
                 &target_host,
                 &target_label,
@@ -292,6 +294,7 @@ pub fn start_monitoring(app: tauri::AppHandle) -> Result<(), String> {
                 }
                 ping_target_and_report(
                     &app_clone,
+                    &store,
                     &target_id,
                     &target_host,
                     &target_label,
@@ -315,6 +318,7 @@ pub fn stop_monitoring() {
 
 async fn ping_target_and_report(
     app: &tauri::AppHandle,
+    store: &MonitorStore,
     target_id: &str,
     target_host: &str,
     target_label: &str,
@@ -336,16 +340,14 @@ async fn ping_target_and_report(
 
             let timestamp = chrono::Utc::now().to_rfc3339();
 
-            // Store in database
-            if let Ok(store) = MonitorStore::new() {
-                let _ = store.insert_record(
-                    target_id,
-                    target_host,
-                    &timestamp,
-                    avg_latency,
-                    loss_rate,
-                );
-            }
+            // Store in database (connection reused)
+            let _ = store.insert_record(
+                target_id,
+                target_host,
+                &timestamp,
+                avg_latency,
+                loss_rate,
+            );
 
             // Emit update event
             let payload = MonitorUpdatePayload {
@@ -381,9 +383,7 @@ async fn ping_target_and_report(
             };
             let _ = app.emit("monitor:update", &payload);
             // Still store the failure
-            if let Ok(store) = MonitorStore::new() {
-                let _ = store.insert_record(target_id, target_host, &timestamp, None, 1.0);
-            }
+            let _ = store.insert_record(target_id, target_host, &timestamp, None, 1.0);
             tracing::warn!("Monitor ping failed for {}: {}", target_host, e);
         }
     }

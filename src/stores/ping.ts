@@ -19,6 +19,8 @@ export interface PingResultItem {
   status: string;
 }
 
+const MAX_RESULTS = 5000;
+
 export const usePingStore = defineStore("ping", () => {
   const target = ref("8.8.8.8");
   const count = ref(4);
@@ -56,6 +58,9 @@ export const usePingStore = defineStore("ping", () => {
       latencyMs: payload.latency_ms,
       status: payload.status,
     });
+    if (results.value.length > MAX_RESULTS * 2) {
+      results.value = results.value.slice(-MAX_RESULTS);
+    }
   }
 
   function handleComplete(payload: PingCompletePayload) {

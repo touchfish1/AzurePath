@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from "vue";
-import { useVirtualList } from "@vueuse/core";
+import { ref, computed, onMounted, watch } from "vue";
+import { useVirtualList, useDebounceFn } from "@vueuse/core";
 import { useRouter } from "vue-router";
 import {
   Clipboard,
@@ -39,6 +39,9 @@ const router = useRouter();
 type Tab = "all" | "favorites" | "timeline";
 const activeTab = ref<Tab>("all");
 const searchQuery = ref("");
+const debouncedSearchQuery = ref("");
+const searchDebounced = useDebounceFn((v: string) => { debouncedSearchQuery.value = v; }, 250);
+watch(searchQuery, (v) => searchDebounced(v));
 
 const clipboardCount = ref(0);
 const deviceCount = ref(0);
@@ -96,8 +99,8 @@ const filteredEntries = computed(() => {
     entries = entries.filter((e) => e.is_favorite);
   }
 
-  if (searchQuery.value.trim()) {
-    const q = searchQuery.value.toLowerCase();
+  if (debouncedSearchQuery.value.trim()) {
+    const q = debouncedSearchQuery.value.toLowerCase();
     entries = entries.filter((e) => {
       if (e.content_type === "text" && e.text_content?.toLowerCase().includes(q)) return true;
       if (e.file_paths?.some((p) => p.toLowerCase().includes(q))) return true;

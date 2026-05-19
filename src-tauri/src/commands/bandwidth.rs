@@ -47,8 +47,8 @@ pub async fn start_bandwidth_monitor(app: AppHandle) -> Result<(), String> {
     let app_clone = app.clone();
 
     tauri::async_runtime::spawn(async move {
-        // Initial counter snapshot.
-        let mut previous: HashMap<String, CounterSnapshot> = match bandwidth::get_counters() {
+        // Initial counter snapshot via spawn_blocking (wmic is blocking).
+        let mut previous: HashMap<String, CounterSnapshot> = match tokio::task::spawn_blocking(bandwidth::get_counters).await.unwrap_or(Err("spawn_blocking failed".into())) {
             Ok(c) => c,
             Err(e) => {
                 let _ = app_clone.emit(
@@ -73,8 +73,8 @@ pub async fn start_bandwidth_monitor(app: AppHandle) -> Result<(), String> {
                 break;
             }
 
-            // Get new counters.
-            let current = match bandwidth::get_counters() {
+            // Get new counters via spawn_blocking (wmic is blocking).
+            let current = match tokio::task::spawn_blocking(bandwidth::get_counters).await.unwrap_or(Err("spawn_blocking failed".into())) {
                 Ok(c) => c,
                 Err(e) => {
                     let _ = app_clone.emit(
