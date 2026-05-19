@@ -1,6 +1,7 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { useToastStore } from "@/stores/toast";
 
 export interface AppSettings {
   theme: "light" | "dark" | "system";
@@ -50,7 +51,7 @@ export const useSettingsStore = defineStore("settings", () => {
     try {
       await invoke("save_settings", { settings: settings.value });
     } catch (e) {
-      console.error("Failed to save settings:", e);
+      useToastStore().error(`保存设置失败: ${e}`);
     } finally {
       saving.value = false;
     }

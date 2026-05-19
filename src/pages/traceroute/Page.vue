@@ -39,7 +39,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="flex h-full flex-col p-6 space-y-6 animate-view-fade">
+  <div class="flex h-full flex-col p-4 md:p-6 space-y-4 md:space-y-6 animate-view-fade">
     <!-- Header -->
     <div>
       <h1 class="text-2xl font-display font-bold text-ink">Traceroute</h1>

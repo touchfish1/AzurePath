@@ -160,6 +160,7 @@ impl FileReceiver {
         self.active.lock().await.remove(&file_id);
     }
 
+    #[allow(dead_code)]
     pub fn stop(&self) {
         self.running.store(false, Ordering::SeqCst);
     }

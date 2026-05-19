@@ -175,9 +175,9 @@ function confirm() {
 
 <template>
   <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/45" @click.self="$emit('close')">
-    <div class="flex w-[640px] max-h-[80vh] flex-col rounded-2xl bg-paper shadow-2xl overflow-hidden">
+    <div class="flex w-full max-w-[640px] max-h-[80vh] flex-col rounded-2xl bg-paper shadow-2xl overflow-hidden">
       <!-- Header -->
-      <div class="flex items-center justify-between border-b border-paper-deep/50 px-6 py-4">
+      <div class="flex items-center justify-between border-b border-paper-deep/50 px-4 md:px-6 py-4">
         <h2 class="text-base font-semibold text-ink">选择扫描端口</h2>
         <button
           class="flex h-7 w-7 items-center justify-center rounded-md bg-paper-deep/30 text-ink-faint transition-colors hover:bg-paper-deep/60"
@@ -188,7 +188,7 @@ function confirm() {
       </div>
 
       <!-- Quick manual input -->
-      <div class="flex items-center gap-2 border-b border-paper-deep/20 px-6 py-3">
+      <div class="flex items-center gap-2 border-b border-paper-deep/20 px-4 md:px-6 py-3">
         <input
           v-model="manualInput"
           type="text"
@@ -200,7 +200,7 @@ function confirm() {
       </div>
 
       <!-- Body -->
-      <div class="flex-1 overflow-y-auto px-6 py-4">
+      <div class="flex-1 overflow-y-auto px-4 md:px-6 py-4">
         <!-- Search -->
         <div class="relative mb-4">
           <Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-faint" />
@@ -257,7 +257,7 @@ function confirm() {
       </div>
 
       <!-- Footer -->
-      <div class="flex items-center justify-between border-t border-paper-deep/50 px-6 py-3">
+      <div class="flex items-center justify-between border-t border-paper-deep/50 px-4 md:px-6 py-3">
         <span class="text-xs text-ink-faint">
           已选择 <strong class="text-ink">{{ sortedSelected.length }}</strong> 个端口
         </span>

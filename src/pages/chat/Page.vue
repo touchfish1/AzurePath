@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from "vue";
-import { Send, MessageSquare, Wifi, WifiOff, Paperclip, FileUp, Download, XCircle, X, History, Search, Trash2, Calendar } from "lucide-vue-next";
+import { Send, MessageSquare, Wifi, WifiOff, Paperclip, FileUp, Download, XCircle, X, History, Search, Trash2, Calendar, Menu, X as XIcon } from "lucide-vue-next";
 import Button from "@/components/ui/button/Button.vue";
+import { useToastStore } from "@/stores/toast";
+
+const toast = useToastStore();
 import {
   lanInit,
   chatSend,
@@ -93,6 +96,9 @@ const historyDateTo = ref("");
 const historyMessages = ref<StoredMessage[]>([]);
 const historyLoading = ref(false);
 
+// Sidebar collapse for narrow screens
+const showSidebar = ref(window.innerWidth >= 1024);
+
 async function openHistory() {
   showHistory.value = true;
   historyKeyword.value = "";
@@ -110,7 +116,7 @@ async function loadHistoryMessages() {
       historyDateTo.value || undefined,
     );
   } catch (e) {
-    console.error("Failed to search history:", e);
+    toast.error(`搜索历史记录失败: ${e}`);
   } finally {
     historyLoading.value = false;
   }
@@ -121,7 +127,7 @@ async function deleteHistoryMessage(id: number) {
     await chatDelete([id]);
     historyMessages.value = historyMessages.value.filter((m) => Number(m.id) !== id);
   } catch (e) {
-    console.error("Failed to delete history message:", e);
+    toast.error(`删除历史消息失败: ${e}`);
   }
 }
 
@@ -132,7 +138,7 @@ async function clearAllHistory() {
     historyMessages.value = [];
     messages.value = await chatMessages();
   } catch (e) {
-    console.error("Failed to clear history:", e);
+    toast.error(`清空历史记录失败: ${e}`);
   }
 }
 
@@ -142,26 +148,26 @@ onMounted(async () => {
       await lanInit();
       initialized.value = true;
     } catch (e) {
-      console.error("Failed to init LAN services:", e);
+      toast.error(`初始化局域网服务失败: ${e}`);
     }
   }
 
   try {
     peers.value = await discoveryPeers();
   } catch (e) {
-    console.error("Failed to load peers:", e);
+    toast.error(`加载设备列表失败: ${e}`);
   }
 
   try {
     messages.value = await chatMessages();
   } catch (e) {
-    console.error("Failed to load messages:", e);
+    toast.error(`加载消息记录失败: ${e}`);
   }
 
   try {
     transfers.value = await fileList();
   } catch (e) {
-    console.error("Failed to load transfers:", e);
+    toast.error(`加载传输记录失败: ${e}`);
   }
 
   unlistenMessage = await onChatMessage((msg) => {
@@ -209,7 +215,7 @@ async function sendMessage() {
     messages.value.push(msg);
     inputText.value = "";
   } catch (e) {
-    console.error("Failed to send message:", e);
+    toast.error(`发送消息失败: ${e}`);
   } finally {
     sending.value = false;
   }
@@ -225,7 +231,7 @@ async function pickFile() {
       filePath.value = selected as string;
     }
   } catch (e) {
-    console.error("Failed to pick file:", e);
+    toast.error(`选择文件失败: ${e}`);
   }
 }
 
@@ -240,7 +246,7 @@ async function pickFolder() {
       filePath.value = selected as string;
     }
   } catch (e) {
-    console.error("Failed to pick folder:", e);
+    toast.error(`选择文件夹失败: ${e}`);
   }
 }
 
@@ -299,7 +305,7 @@ async function sendFileMessage() {
     filePath.value = "";
     showFileInput.value = false;
   } catch (e) {
-    console.error("Failed to send file:", e);
+    toast.error(`发送文件失败: ${e}`);
     const errIdx = transfers.value.findIndex(t => t.id === tempId);
     if (errIdx >= 0) {
       transfers.value[errIdx] = {
@@ -317,14 +323,14 @@ async function handleAccept() {
   try {
     await fileAccept(incomingRequest.value.fileId);
   } catch (e) {
-    console.error("Accept error:", e);
+    toast.error(`接受文件失败: ${e}`);
   }
   incomingRequest.value = null;
 }
 
 function handleReject() {
   if (!incomingRequest.value) return;
-  fileReject(incomingRequest.value.fileId).catch(console.error);
+  fileReject(incomingRequest.value.fileId).catch((e) => toast.error(`拒绝文件失败: ${e}`));
   incomingRequest.value = null;
 }
 
@@ -348,7 +354,7 @@ async function copyDownloadUrl(t: FileTransfer) {
       setTimeout(() => { btn.textContent = "复制下载链接"; }, 2000);
     }
   } catch (e) {
-    console.error("Failed to copy URL:", e);
+    toast.error(`复制下载链接失败: ${e}`);
   }
 }
 </script>
@@ -356,12 +362,22 @@ async function copyDownloadUrl(t: FileTransfer) {
 <template>
   <div class="flex h-full flex-col animate-view-fade">
     <!-- Header -->
-    <div class="flex items-center justify-between border-b border-paper-deep/50 px-6 py-3">
-      <div>
-        <h1 class="text-xl font-display font-bold text-ink">聊天</h1>
-        <p class="text-xs text-ink-faint">
-          在线: {{ onlinePeers.length }} / 共 {{ peers.length }}
-        </p>
+    <div class="flex items-center justify-between border-b border-paper-deep/50 px-4 md:px-6 py-3">
+      <div class="flex items-center gap-2">
+        <button
+          class="lg:hidden rounded-lg p-1.5 text-ink-faint hover:text-ink hover:bg-paper-deep/30 transition-colors"
+          @click="showSidebar = !showSidebar"
+          :title="showSidebar ? '隐藏设备列表' : '显示设备列表'"
+        >
+          <Menu v-if="!showSidebar" class="h-4 w-4" />
+          <XIcon v-else class="h-4 w-4" />
+        </button>
+        <div>
+          <h1 class="text-xl font-display font-bold text-ink">聊天</h1>
+          <p class="text-xs text-ink-faint">
+            在线: {{ onlinePeers.length }} / 共 {{ peers.length }}
+          </p>
+        </div>
       </div>
       <Button variant="ghost" size="sm" @click="openHistory">
         <History class="mr-1 h-3.5 w-3.5" />
@@ -371,7 +387,10 @@ async function copyDownloadUrl(t: FileTransfer) {
 
     <div class="flex flex-1 overflow-hidden">
       <!-- Peer list sidebar -->
-      <aside class="w-52 shrink-0 border-r border-paper-deep/30 overflow-y-auto bg-paper-warm/30">
+      <aside
+        class="shrink-0 border-r border-paper-deep/30 overflow-y-auto bg-paper-warm/30 transition-all duration-200"
+        :class="showSidebar ? 'w-52' : 'w-0 lg:w-52 overflow-hidden lg:overflow-y-auto'"
+      >
         <button
           class="flex w-full items-center gap-3 px-4 py-3 text-sm transition-colors hover:bg-paper-deep/30"
           :class="selectedPeerId === '*' ? 'bg-bamboo/10 text-bamboo border-l-2 border-bamboo' : 'text-ink-soft'"

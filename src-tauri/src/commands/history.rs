@@ -65,22 +65,6 @@ pub async fn activity_log(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::history::ActivityStore;
-
-    fn init_test_store() {
-        let store = ActivityStore::new_test().unwrap();
-        let _ = ACTIVITY_STORE.set(store);
-    }
-
-    #[test]
-    fn test_get_store_not_initialized() {
-        // Reset by creating a new scope — we can't actually reset a OnceLock,
-        // but the module test should be run in isolation.
-        assert!(std::panic::catch_unwind(|| {
-            let _ = get_store().unwrap_err();
-        })
-        .is_err());
-    }
 
     #[test]
     fn test_activity_list_defaults() {

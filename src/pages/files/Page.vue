@@ -11,6 +11,7 @@ import {
   ArrowDownToLine,
 } from "lucide-vue-next";
 import Button from "@/components/ui/button/Button.vue";
+import { useToastStore } from "@/stores/toast";
 import {
   lanInit,
   fileList,
@@ -24,6 +25,8 @@ import {
 import { formatSize, progressPercent, formatTime } from "@/lib/format";
 import { useFileTransferListeners } from "@/composables/useFileTransfer";
 import { sendSystemNotification } from "@/composables/useNotification";
+
+const toast = useToastStore();
 
 const transfers = ref<FileTransfer[]>([]);
 const peers = ref<PeerInfo[]>([]);
@@ -79,14 +82,14 @@ onMounted(async () => {
       await lanInit();
       initialized.value = true;
     } catch (e) {
-      console.error("Failed to init LAN:", e);
+      toast.error(`初始化局域网服务失败: ${e}`);
     }
   }
 
   try {
     transfers.value = await fileList();
   } catch (e) {
-    console.error("Failed to list transfers:", e);
+    toast.error(`加载传输记录失败: ${e}`);
   } finally {
     loading.value = false;
   }
@@ -94,7 +97,7 @@ onMounted(async () => {
   try {
     peers.value = await discoveryPeers();
   } catch (e) {
-    console.error("Failed to load peers:", e);
+    toast.error(`加载设备列表失败: ${e}`);
   }
 
   await setupFileListeners();
@@ -110,7 +113,7 @@ async function handleAccept(fileId: string) {
     const t = transfers.value.find((x) => x.id === fileId);
     if (t) t.status = "transferring";
   } catch (e) {
-    console.error("Accept error:", e);
+    toast.error(`接受文件失败: ${e}`);
   }
   incomingRequest.value = null;
 }
@@ -121,7 +124,7 @@ async function handleReject(fileId: string) {
     const t = transfers.value.find((x) => x.id === fileId);
     if (t) t.status = "rejected";
   } catch (e) {
-    console.error("Reject error:", e);
+    toast.error(`拒绝文件失败: ${e}`);
   }
   incomingRequest.value = null;
 }
@@ -134,7 +137,7 @@ async function handleDownload(fileId: string) {
       window.open(url, "_blank");
     }
   } catch (e) {
-    console.error("Download error:", e);
+    toast.error(`下载文件失败: ${e}`);
   } finally {
     downloadingId.value = null;
   }
@@ -151,13 +154,13 @@ async function copyFileDownloadUrl(fileId: string) {
       setTimeout(() => { copyBtnTexts.value[fileId] = "复制下载链接"; }, 2000);
     }
   } catch (e) {
-    console.error("Failed to copy download URL:", e);
+    toast.error(`复制下载链接失败: ${e}`);
   }
 }
 </script>
 
 <template>
-  <div class="flex h-full flex-col p-6 space-y-6 animate-view-fade">
+  <div class="flex h-full flex-col p-4 md:p-6 space-y-4 md:space-y-6 animate-view-fade">
     <!-- Header -->
     <div>
       <h1 class="text-xl font-display font-bold text-ink">文件传输</h1>
@@ -169,7 +172,7 @@ async function copyFileDownloadUrl(fileId: string) {
       v-if="incomingRequest"
       class="animate-fade-up rounded-xl border border-bamboo/30 bg-bamboo/5 p-4"
     >
-      <div class="flex items-center justify-between">
+      <div class="flex flex-wrap items-center justify-between gap-2">
         <div class="flex items-center gap-3">
           <div class="rounded-lg bg-bamboo/10 p-2">
             <Download class="h-5 w-5 text-bamboo" />

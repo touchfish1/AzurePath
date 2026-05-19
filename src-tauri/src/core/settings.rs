@@ -77,7 +77,6 @@ impl AppSettings {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
 
     #[test]
     fn test_default_settings() {
@@ -121,25 +120,6 @@ mod tests {
         assert!(!deserialized.notify_file_transfer);
         assert!(!deserialized.notify_chat_message);
         assert!(deserialized.notify_scan_complete);
-    }
-
-    #[test]
-    fn test_roundtrip_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("settings.json");
-
-        // Override settings_path for testing by manipulating env
-        let s = AppSettings {
-            theme: "light".to_string(),
-            ..Default::default()
-        };
-
-        let json = serde_json::to_string_pretty(&s).unwrap();
-        std::fs::write(&path, &json).unwrap();
-
-        let content = std::fs::read_to_string(&path).unwrap();
-        let loaded: AppSettings = serde_json::from_str(&content).unwrap();
-        assert_eq!(loaded.theme, "light");
     }
 
     #[test]

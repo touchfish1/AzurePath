@@ -1,4 +1,5 @@
 //! Native ICMP Echo ping via raw sockets.
+#![allow(dead_code)]
 //!
 //! ## Unix
 //! Creates a raw ICMP socket via `libc` and sends Echo Request (type=8)

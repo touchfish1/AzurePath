@@ -2,8 +2,11 @@
 import { ref, onMounted, onUnmounted, computed } from "vue";
 import { useVirtualList } from "@vueuse/core";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { Search, Trash2, Star, Copy, FileText, Image, File, X, ArrowUp, ArrowDown, Download } from "lucide-vue-next";
+import { Search, Trash2, Star, Copy, FileText, Image, File, X, ArrowUp, ArrowDown, Download, CheckSquare, Square } from "lucide-vue-next";
 import Button from "@/components/ui/button/Button.vue";
+import { useToastStore } from "@/stores/toast";
+
+const toast = useToastStore();
 import {
   clipboardStart,
   clipboardStop,
@@ -141,14 +144,14 @@ onMounted(async () => {
   try {
     await clipboardStart();
   } catch (e) {
-    console.error("Failed to start clipboard:", e);
+    toast.error(`启动剪贴板监控失败: ${e}`);
   }
   await loadEntries();
 
   try {
     intervalMs.value = await clipboardGetInterval();
   } catch (e) {
-    console.error("Failed to get interval:", e);
+    toast.error(`获取监控间隔失败: ${e}`);
   }
 
   try {
@@ -156,13 +159,13 @@ onMounted(async () => {
       entries.value.unshift(entry);
     });
   } catch (e) {
-    console.error("Failed to listen for clipboard events:", e);
+    toast.error(`监听剪贴板事件失败: ${e}`);
   }
 });
 
 onUnmounted(() => {
   unlistenNew?.();
-  clipboardStop().catch((e) => console.error("Failed to stop clipboard:", e));
+  clipboardStop().catch((e) => toast.error(`停止剪贴板监控失败: ${e}`));
 });
 
 async function loadEntries() {
@@ -170,7 +173,7 @@ async function loadEntries() {
   try {
     entries.value = await clipboardList(undefined, 500);
   } catch (e) {
-    console.error("Failed to load clipboard entries:", e);
+    toast.error(`加载剪贴板记录失败: ${e}`);
   } finally {
     loading.value = false;
   }
@@ -182,7 +185,7 @@ async function toggleFavorite(id: string) {
     const entry = entries.value.find((e) => e.id === id);
     if (entry) entry.is_favorite = newVal;
   } catch (e) {
-    console.error("Failed to toggle favorite:", e);
+    toast.error(`切换收藏失败: ${e}`);
   }
 }
 
@@ -192,7 +195,7 @@ async function copyEntry(id: string) {
     copiedId.value = id;
     setTimeout(() => { copiedId.value = null; }, 2000);
   } catch (e) {
-    console.error("Failed to copy:", e);
+    toast.error(`复制到剪贴板失败: ${e}`);
   }
 }
 
@@ -202,7 +205,7 @@ async function deleteEntry(id: string) {
     entries.value = entries.value.filter((e) => e.id !== id);
     selectedIds.value.delete(id);
   } catch (e) {
-    console.error("Failed to delete:", e);
+    toast.error(`删除失败: ${e}`);
   }
 }
 
@@ -213,7 +216,7 @@ async function clearAll() {
     entries.value = [];
     selectedIds.value.clear();
   } catch (e) {
-    console.error("Failed to clear:", e);
+    toast.error(`清空剪贴板失败: ${e}`);
   }
 }
 
@@ -222,7 +225,7 @@ async function changeInterval(ms: number) {
     await clipboardSetInterval(ms);
     intervalMs.value = ms;
   } catch (e) {
-    console.error("Failed to set interval:", e);
+    toast.error(`设置监控间隔失败: ${e}`);
   }
 }
 
@@ -257,7 +260,7 @@ async function batchDelete() {
     entries.value = entries.value.filter((e) => !selectedIds.value.has(e.id));
     selectedIds.value.clear();
   } catch (e) {
-    console.error("Failed to batch delete:", e);
+    toast.error(`批量删除失败: ${e}`);
   }
 }
 
@@ -267,7 +270,7 @@ async function batchExport() {
   try {
     await clipboardExport(Array.from(selectedIds.value), "json");
   } catch (e) {
-    console.error("Failed to export:", e);
+    toast.error(`批量导出失败: ${e}`);
   }
 }
 
@@ -275,7 +278,7 @@ async function changeStorageLimit() {
   try {
     await clipboardSetLimit(storageLimit.value);
   } catch (e) {
-    console.error("Failed to set storage limit:", e);
+    toast.error(`设置存储上限失败: ${e}`);
   }
 }
 </script>
@@ -283,8 +286,8 @@ async function changeStorageLimit() {
 <template>
   <div class="flex h-full flex-col animate-view-fade">
     <!-- Header -->
-    <div class="border-b border-paper-deep/50 px-6 py-3">
-      <div class="flex items-center justify-between">
+    <div class="border-b border-paper-deep/50 px-4 md:px-6 py-3">
+      <div class="flex flex-wrap items-center justify-between gap-2">
         <h1 class="text-xl font-display font-bold text-ink">剪贴板管理</h1>
         <div class="flex items-center gap-2">
           <div class="relative">
@@ -292,7 +295,7 @@ async function changeStorageLimit() {
             <input
               v-model="searchQuery"
               placeholder="搜索剪贴板内容..."
-              class="w-56 rounded-lg border border-paper-deep bg-paper-warm/50 pl-9 pr-3 py-1.5 text-sm text-ink placeholder:text-ink-faint/50 outline-none"
+              class="w-40 md:w-56 rounded-lg border border-paper-deep bg-paper-warm/50 pl-9 pr-3 py-1.5 text-sm text-ink placeholder:text-ink-faint/50 outline-none"
             />
           </div>
           <Button variant="danger" size="sm" @click="clearAll">
@@ -304,12 +307,12 @@ async function changeStorageLimit() {
     </div>
 
     <!-- Content type filter bar -->
-    <div class="flex items-center gap-1 px-6 py-2 border-b border-paper-deep/20">
-      <span class="text-xs font-medium text-ink-faint mr-2">类型筛选:</span>
+    <div class="flex flex-wrap items-center gap-1 px-4 md:px-6 py-2 border-b border-paper-deep/20 overflow-x-auto">
+      <span class="text-xs font-medium text-ink-faint mr-2 shrink-0">类型筛选:</span>
       <button
         v-for="opt in contentTypeOptions"
         :key="opt.value"
-        class="rounded-lg px-3 py-1 text-xs font-medium transition-colors"
+        class="rounded-lg px-3 py-1 text-xs font-medium transition-colors shrink-0"
         :class="contentTypeFilter === opt.value ? 'bg-bamboo/15 text-bamboo ring-1 ring-bamboo/30' : 'text-ink-soft hover:bg-paper-deep/30 hover:text-ink'"
         @click="setContentTypeFilter(opt.value)"
       >
@@ -320,7 +323,7 @@ async function changeStorageLimit() {
     <!-- Batch action bar -->
     <div
       v-if="hasSelection"
-      class="flex items-center gap-3 px-6 py-2 bg-bamboo/5 border-b border-bamboo/20"
+      class="flex flex-wrap items-center gap-3 px-4 md:px-6 py-2 bg-bamboo/5 border-b border-bamboo/20"
     >
       <span class="text-sm text-ink-soft">
         已选 {{ selectedIds.size }} 项
@@ -440,7 +443,7 @@ async function changeStorageLimit() {
     </div>
 
     <!-- Footer -->
-    <div class="border-t border-paper-deep/50 px-6 py-2 text-xs text-ink-faint flex items-center justify-between">
+    <div class="flex flex-wrap items-center justify-between gap-2 border-t border-paper-deep/50 px-4 md:px-6 py-2 text-xs text-ink-faint">
       <div class="flex items-center gap-3">
         <span>{{ entries.length }} 条记录 · 自动监听中</span>
         <!-- Select all checkbox -->
@@ -457,7 +460,7 @@ async function changeStorageLimit() {
           <span class="text-ink-faint/70">全选</span>
         </label>
       </div>
-      <div class="flex items-center gap-3">
+      <div class="flex flex-wrap items-center gap-3">
         <!-- Storage limit -->
         <div class="flex items-center gap-1.5">
           <span class="text-ink-faint/70">保留:</span>

@@ -14,6 +14,7 @@ pub const LISTEN_PORT: u16 = 42070;
 
 pub struct PeerConnection {
     pub peer_id: String,
+    #[allow(dead_code)]
     pub addr: String,
     pub writer: Mutex<OwnedWriteHalf>,
 }
@@ -301,6 +302,7 @@ impl ConnectionManager {
         conns.keys().cloned().collect()
     }
 
+    #[allow(dead_code)]
     pub fn stop(&self) {
         self.running.store(false, Ordering::SeqCst);
     }

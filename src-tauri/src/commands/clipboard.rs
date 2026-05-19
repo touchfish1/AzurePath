@@ -13,10 +13,12 @@ use tracing::{info, warn};
 static CLIPBOARD_STORE: OnceLock<Arc<ClipboardStore>> = OnceLock::new();
 static CLIPBOARD_MONITOR: OnceLock<ClipboardMonitor> = OnceLock::new();
 
+#[allow(dead_code)]
 pub fn clipboard_store() -> Option<&'static Arc<ClipboardStore>> {
     CLIPBOARD_STORE.get()
 }
 
+#[allow(dead_code)]
 pub fn clipboard_monitor() -> Option<&'static ClipboardMonitor> {
     CLIPBOARD_MONITOR.get()
 }

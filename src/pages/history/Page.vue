@@ -20,6 +20,7 @@ import {
   ArrowDown,
 } from "lucide-vue-next";
 import { formatTime, truncate } from "@/lib/format";
+import { useToastStore } from "@/stores/toast";
 import Button from "@/components/ui/button/Button.vue";
 import {
   clipboardList,
@@ -30,6 +31,7 @@ import {
   type ClipboardEntry,
 } from "@/lib/tauri";
 
+const toast = useToastStore();
 const router = useRouter();
 
 type Tab = "all" | "favorites" | "timeline";
@@ -188,7 +190,7 @@ onMounted(async () => {
       },
     ];
   } catch (e) {
-    console.error("Failed to load activity data:", e);
+    toast.error("加载活动数据失败");
   } finally {
     loading.value = false;
   }
@@ -238,7 +240,7 @@ async function clearAll() {
 <template>
   <div class="flex h-full flex-col animate-view-fade">
     <!-- Header -->
-    <div class="border-b border-paper-deep/50 px-6 py-4">
+    <div class="border-b border-paper-deep/50 px-4 md:px-6 py-4">
       <div class="flex items-center gap-3">
         <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-bamboo/10 text-bamboo">
           <History class="h-5 w-5" />
@@ -251,7 +253,7 @@ async function clearAll() {
     </div>
 
     <!-- Tabs + Search bar -->
-    <div class="flex items-center justify-between border-b border-paper-deep/30 px-6 py-2">
+    <div class="flex items-center justify-between border-b border-paper-deep/30 px-4 md:px-6 py-2">
       <div class="flex gap-1">
         <button
           v-for="tab in tabs"
@@ -277,7 +279,7 @@ async function clearAll() {
     </div>
 
     <!-- Content -->
-    <div class="flex-1 flex flex-col overflow-hidden p-6">
+    <div class="flex-1 flex flex-col overflow-hidden p-4 md:p-6">
       <div v-if="loading" class="flex items-center justify-center h-full text-sm text-ink-faint">
         <div class="flex flex-col items-center gap-2">
           <Activity class="h-5 w-5 animate-pulse text-bamboo" />

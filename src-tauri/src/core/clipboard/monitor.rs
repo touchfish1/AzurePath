@@ -14,13 +14,16 @@ pub const DEFAULT_INTERVAL_MS: u64 = 1000;
 
 enum ClipboardContent {
     Text {
+        #[allow(dead_code)]
         text: String,
+        #[allow(dead_code)]
         hash: u64,
     },
     Image {
         rgba: Vec<u8>,
         width: u32,
         height: u32,
+        #[allow(dead_code)]
         hash: u64,
     },
 }

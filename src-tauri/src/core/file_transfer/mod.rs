@@ -26,6 +26,7 @@ pub struct BroadcastFileState {
 
 pub struct FileTransferService {
     sender: Arc<FileSender>,
+    #[allow(dead_code)]
     receiver: Arc<FileReceiver>,
     /// Tracks known transfers (file_id -> FileTransfer)
     transfers: Arc<Mutex<HashMap<String, FileTransfer>>>,
@@ -195,11 +196,13 @@ impl FileTransferService {
     }
 
     /// Get the sender peer_id for an incoming file request.
+    #[allow(dead_code)]
     pub async fn get_request_sender(&self, file_id: &str) -> Option<String> {
         self.request_senders.lock().await.get(file_id).cloned()
     }
 
     /// Remove a request sender mapping.
+    #[allow(dead_code)]
     pub async fn remove_request_sender(&self, file_id: &str) {
         self.request_senders.lock().await.remove(file_id);
     }
@@ -253,6 +256,7 @@ impl FileTransferService {
     }
 
     /// Mark a transfer as errored.
+    #[allow(dead_code)]
     pub async fn mark_error(&self, file_id: &str, error: &str) {
         let mut transfers = self.transfers.lock().await;
         if let Some(ft) = transfers.get_mut(file_id) {
@@ -302,6 +306,7 @@ impl FileTransferService {
     }
 
     /// Remove a broadcast file record after it has been processed.
+    #[allow(dead_code)]
     pub async fn remove_broadcast(&self, file_id: &str) {
         self.broadcast_files.lock().await.remove(file_id);
     }

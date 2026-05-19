@@ -2,7 +2,7 @@
 import { onMounted, watch } from "vue";
 import { Sun, Moon, Monitor, Save } from "lucide-vue-next";
 import Button from "@/components/ui/button/Button.vue";
-import { useSettingsStore, type AppSettings } from "@/stores/settings";
+import { useSettingsStore } from "@/stores/settings";
 import { useToastStore } from "@/stores/toast";
 import { useThemeStore } from "@/stores/theme";
 

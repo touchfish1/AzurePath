@@ -1,8 +1,11 @@
 pub mod tcp_connect;
 
+#[cfg(test)]
 use std::sync::Arc;
+#[cfg(test)]
 use tokio::sync::Semaphore;
 
+#[cfg(test)]
 use crate::types::port_scan::{OpenPort, PortRange, ScanOptions};
 
 /// Scan a range of ports on a target using TCP Connect scanning.
@@ -91,7 +94,6 @@ pub async fn scan_ports(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::utils;
     use crate::types::port_scan::ScanOptions;
 
     #[test]
