@@ -2,10 +2,14 @@
 import { onMounted, onUnmounted } from "vue";
 import { Play, Square, Radio, Copy } from "lucide-vue-next";
 import Button from "@/components/ui/button/Button.vue";
+import PresetDropdown from "@/components/preset/PresetDropdown.vue";
 import { usePingStore } from "@/stores/ping";
+import { usePresetStore } from "@/stores/preset";
 import { useToastStore } from "@/stores/toast";
+import type { Preset } from "@/lib/tauri";
 
 const toast = useToastStore();
+const presetStore = usePresetStore();
 
 function copyIp(target: string) {
   navigator.clipboard.writeText(target).then(() => {
@@ -14,6 +18,22 @@ function copyIp(target: string) {
 }
 
 const store = usePingStore();
+
+function loadPreset(preset: Preset) {
+  const params = preset.params as Record<string, unknown>;
+  if (params.target) store.target = String(params.target);
+  if (params.count) store.count = Number(params.count);
+  if (params.timeout) store.timeout = Number(params.timeout);
+}
+
+function savePreset(name: string) {
+  const params = {
+    target: store.target,
+    count: store.count,
+    timeout: store.timeout,
+  };
+  presetStore.save(name, "ping", params);
+}
 
 onMounted(async () => {
   // Re-attach listeners if a task is still running from a previous visit
@@ -29,7 +49,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="flex h-full flex-col p-6 space-y-6 animate-view-fade">
+  <div class="flex h-full flex-col p-4 md:p-6 space-y-4 md:space-y-6 animate-view-fade">
     <!-- Header -->
     <div>
       <h1 class="text-2xl font-display font-bold text-ink">Ping</h1>
@@ -84,6 +104,14 @@ onUnmounted(() => {
             停止
           </Button>
         </div>
+      </div>
+      <!-- Presets -->
+      <div class="mt-3 border-t border-paper-deep/30 pt-3">
+        <PresetDropdown
+          feature="ping"
+          @load="loadPreset"
+          @save-request="savePreset"
+        />
       </div>
     </div>
 

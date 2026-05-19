@@ -1,34 +1,25 @@
-import { defineStore } from "pinia";
-import { ref } from "vue";
+import { defineStore } from 'pinia'
 
-export interface ToastItem {
-  id: number;
-  type: "success" | "error" | "info";
-  message: string;
+interface Toast {
+  id: number
+  message: string
+  type: 'success' | 'error' | 'info'
 }
 
-export const useToastStore = defineStore("toast", () => {
-  const toasts = ref<ToastItem[]>([]);
-  let nextId = 1;
-
-  function add(type: "success" | "error" | "info", message: string) {
-    const id = nextId++;
-    toasts.value.push({ id, type, message });
-
-    // Enforce max 3 items — remove oldest
-    if (toasts.value.length > 3) {
-      toasts.value.shift();
-    }
-
-    // Auto-remove after 2.5 seconds
-    setTimeout(() => {
-      remove(id);
-    }, 2500);
+export const useToastStore = defineStore('toast', {
+  state: () => ({ toasts: [] as Toast[], nextId: 0 }),
+  actions: {
+    add(type: 'success' | 'error' | 'info', message: string) {
+      const id = this.nextId++
+      this.toasts.push({ id, message, type })
+      setTimeout(() => { this.toasts = this.toasts.filter(t => t.id !== id) }, 2500)
+      return id
+    },
+    remove(id: number) {
+      this.toasts = this.toasts.filter(t => t.id !== id)
+    },
+    success(message: string) { this.add('success', message) },
+    error(message: string) { this.add('error', message) },
+    info(message: string) { this.add('info', message) },
   }
-
-  function remove(id: number) {
-    toasts.value = toasts.value.filter((t) => t.id !== id);
-  }
-
-  return { toasts, add, remove };
-});
+})

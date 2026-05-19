@@ -154,6 +154,11 @@ pub fn run() {
             commands::http_check::http_check,
             commands::ssl_check::ssl_check,
             commands::mac_lookup::mac_lookup,
+            // Phase 9 — Direction A
+            commands::speedtest::start_speedtest,
+            commands::preset::save_preset,
+            commands::preset::load_presets,
+            commands::preset::delete_preset,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

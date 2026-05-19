@@ -576,3 +576,73 @@ export function clipboardExport(ids: string[], format: string): Promise<string> 
 export function clipboardSetLimit(limit: number): Promise<void> {
   return invoke<void>("clipboard_set_limit", { limit });
 }
+
+// ============================================================
+// Speedtest (Phase 4 Direction A)
+// ============================================================
+
+export interface SpeedtestResult {
+  downloadMbps: number;
+  uploadMbps: number;
+  latencyMs: number;
+  jitterMs: number;
+  peerIp: string;
+}
+
+export interface SpeedtestProgress {
+  phase: string;
+  percent: number;
+  currentValue: number;
+}
+
+export function startSpeedtest(
+  peerIp: string,
+  port: number,
+  durationSecs: number,
+  mode: string,
+): Promise<string> {
+  return invoke<string>("start_speedtest", { peerIp, port, durationSecs, mode });
+}
+
+export function onSpeedtestProgress(
+  cb: (payload: SpeedtestProgress) => void,
+): Promise<UnlistenFn> {
+  return listen<SpeedtestProgress>("speedtest:progress", (e) => cb(e.payload));
+}
+
+export function onSpeedtestComplete(
+  cb: (payload: SpeedtestResult) => void,
+): Promise<UnlistenFn> {
+  return listen<SpeedtestResult>("speedtest:complete", (e) => cb(e.payload));
+}
+
+// ============================================================
+// Presets (Phase 4 Direction A)
+// ============================================================
+
+export interface Preset {
+  id: string;
+  name: string;
+  feature: string;
+  params: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export function savePreset(
+  name: string,
+  feature: string,
+  params: string,
+): Promise<Preset> {
+  return invoke<Preset>("save_preset", { name, feature, params });
+}
+
+export function loadPresets(feature?: string): Promise<Preset[]> {
+  return invoke<Preset[]>("load_presets", {
+    ...(feature !== undefined ? { feature } : {}),
+  });
+}
+
+export function deletePreset(id: string): Promise<void> {
+  return invoke<void>("delete_preset", { id });
+}

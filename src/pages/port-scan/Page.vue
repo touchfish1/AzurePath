@@ -2,10 +2,14 @@
 import { onMounted, onUnmounted, ref, computed } from "vue";
 import { Play, Square, Scan, Copy, ArrowUp, ArrowDown } from "lucide-vue-next";
 import Button from "@/components/ui/button/Button.vue";
+import PresetDropdown from "@/components/preset/PresetDropdown.vue";
 import { usePortScanStore } from "@/stores/portScan";
+import { usePresetStore } from "@/stores/preset";
 import { useToastStore } from "@/stores/toast";
+import type { Preset } from "@/lib/tauri";
 
 const toast = useToastStore();
+const presetStore = usePresetStore();
 
 function copyPort(port: number) {
   navigator.clipboard.writeText(String(port)).then(() => {
@@ -14,6 +18,26 @@ function copyPort(port: number) {
 }
 
 const store = usePortScanStore();
+
+function loadPreset(preset: Preset) {
+  const params = preset.params as Record<string, unknown>;
+  if (params.target) store.target = String(params.target);
+  if (params.portStart) store.portStart = Number(params.portStart);
+  if (params.portEnd) store.portEnd = Number(params.portEnd);
+  if (params.concurrency) store.concurrency = Number(params.concurrency);
+  if (params.timeout) store.timeout = Number(params.timeout);
+}
+
+function savePreset(name: string) {
+  const params = {
+    target: store.target,
+    portStart: store.portStart,
+    portEnd: store.portEnd,
+    concurrency: store.concurrency,
+    timeout: store.timeout,
+  };
+  presetStore.save(name, "port_scan", params);
+}
 
 // Sorting state
 const sortKey = ref<string | null>(null);
@@ -68,7 +92,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="flex h-full flex-col p-6 space-y-6 animate-view-fade">
+  <div class="flex h-full flex-col p-4 md:p-6 space-y-4 md:space-y-6 animate-view-fade">
     <!-- Header -->
     <div>
       <h1 class="text-2xl font-display font-bold text-ink">端口扫描</h1>
@@ -119,6 +143,14 @@ onUnmounted(() => {
             停止
           </Button>
         </div>
+      </div>
+      <!-- Presets -->
+      <div class="mt-3 border-t border-paper-deep/30 pt-3">
+        <PresetDropdown
+          feature="port_scan"
+          @load="loadPreset"
+          @save-request="savePreset"
+        />
       </div>
     </div>
 

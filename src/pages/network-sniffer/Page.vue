@@ -13,6 +13,8 @@ import {
   ArrowDown,
 } from "lucide-vue-next";
 import Button from "@/components/ui/button/Button.vue";
+import PresetDropdown from "@/components/preset/PresetDropdown.vue";
+import { usePresetStore } from "@/stores/preset";
 import PortModal from "@/components/network-sniffer/PortModal.vue";
 import {
   snifferStart,
@@ -26,11 +28,13 @@ import {
   type DeviceResult,
   type SnifferProgress,
   type PortPreset,
+  type Preset,
 } from "@/lib/tauri";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { useToastStore } from "@/stores/toast";
 
 const toast = useToastStore();
+const presetStore = usePresetStore();
 
 function copyIp(ip: string) {
   navigator.clipboard.writeText(ip).then(() => {
@@ -227,7 +231,7 @@ async function stopScan() {
     try {
       await snifferStop(taskId.value);
     } catch (e) {
-      console.error("停止扫描失败:", e);
+      toast.error(`停止扫描失败: ${e}`);
     }
   }
   scanState.value = "idle";
@@ -248,7 +252,7 @@ async function exportResults(format: "json" | "csv") {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   } catch (e) {
-    console.error("导出失败:", e);
+    toast.error(`导出失败: ${e}`);
   }
 }
 
@@ -259,13 +263,33 @@ function cleanup() {
   unlisteners.length = 0;
 }
 
+function loadPreset(preset: Preset) {
+  const params = preset.params as Record<string, unknown>;
+  if (params.targets) targets.value = String(params.targets);
+  if (params.scanMode) scanMode.value = params.scanMode as "fast" | "deep";
+  if (params.concurrencyHosts) concurrencyHosts.value = Number(params.concurrencyHosts);
+  if (params.concurrencyPorts) concurrencyPorts.value = Number(params.concurrencyPorts);
+  if (params.selectedPorts) selectedPorts.value = params.selectedPorts as number[];
+}
+
+function savePreset(name: string) {
+  const params = {
+    targets: targets.value,
+    scanMode: scanMode.value,
+    concurrencyHosts: concurrencyHosts.value,
+    concurrencyPorts: concurrencyPorts.value,
+    selectedPorts: selectedPorts.value,
+  };
+  presetStore.save(name, "sniffer", params);
+}
+
 onUnmounted(cleanup);
 </script>
 
 <template>
   <div class="flex h-full flex-col animate-view-fade">
     <!-- Header -->
-    <div class="border-b border-paper-deep/50 px-6 py-3">
+    <div class="border-b border-paper-deep/50 px-4 md:px-6 py-3">
       <h1 class="text-xl font-display font-bold text-ink">网络嗅探</h1>
       <p class="text-xs text-ink-faint">扫描局域网设备，检测开放端口与运行服务</p>
     </div>
@@ -409,6 +433,15 @@ onUnmounted(cleanup);
             />
           </div>
           <span class="text-[10px] text-ink-faint/60">并发数越高扫描越快，但可能增加网络负载</span>
+        </div>
+
+        <!-- Presets -->
+        <div class="mt-3 border-t border-paper-deep/30 pt-3">
+          <PresetDropdown
+            feature="sniffer"
+            @load="loadPreset"
+            @save-request="savePreset"
+          />
         </div>
 
         <!-- Progress -->
