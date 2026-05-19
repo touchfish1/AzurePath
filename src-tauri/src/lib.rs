@@ -8,6 +8,7 @@ mod types;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .invoke_handler(tauri::generate_handler![
             // Phase 1
             commands::ping::ping_start,
@@ -31,6 +32,14 @@ pub fn run() {
             commands::file_transfer::file_list,
             commands::file_transfer::file_broadcast,
             commands::file_transfer::get_file_download_url,
+            // Phase 3 — Clipboard
+            commands::clipboard::clipboard_start,
+            commands::clipboard::clipboard_stop,
+            commands::clipboard::clipboard_list,
+            commands::clipboard::clipboard_delete,
+            commands::clipboard::clipboard_toggle_favorite,
+            commands::clipboard::clipboard_copy,
+            commands::clipboard::clipboard_clear,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
