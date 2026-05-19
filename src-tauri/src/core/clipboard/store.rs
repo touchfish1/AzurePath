@@ -79,30 +79,25 @@ impl ClipboardStore {
     pub fn list(&self, search: Option<&str>, limit: u32) -> Result<Vec<ClipboardEntry>, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
 
-        let (sql, _) = if let Some(_keyword) = search {
-            (
+        let sql = if search.is_some() {
                 format!(
                     "SELECT id, content_type, text_content, image_path, file_paths, content_hash, is_favorite, created_at
                      FROM clipboard_entries
-                     WHERE text_content LIKE ?1
+                     WHERE text_content LIKE ?1 ESCAPE '\\'
                      ORDER BY is_favorite DESC, created_at DESC LIMIT ?2"
-                ),
-                2,
-            )
+                )
         } else {
-            (
                 "SELECT id, content_type, text_content, image_path, file_paths, content_hash, is_favorite, created_at
                  FROM clipboard_entries
                  ORDER BY is_favorite DESC, created_at DESC LIMIT ?1"
-                    .to_string(),
-                1,
-            )
+                    .to_string()
         };
 
         let mut stmt = conn.prepare(&sql).map_err(|e| format!("Failed to prepare: {}", e))?;
 
         let rows = if let Some(keyword) = search {
-            let pattern = format!("%{}%", keyword);
+            let escaped = keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
+            let pattern = format!("%{}%", escaped);
             stmt.query_map(params![pattern, limit], Self::map_row)
         } else {
             stmt.query_map(params![limit], Self::map_row)

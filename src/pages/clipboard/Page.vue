@@ -4,6 +4,7 @@ import { Search, Trash2, Star, Copy, FileText, Image, File, X } from "lucide-vue
 import Button from "@/components/ui/button/Button.vue";
 import {
   clipboardStart,
+  clipboardStop,
   clipboardList,
   clipboardDelete,
   clipboardToggleFavorite,
@@ -36,13 +37,18 @@ onMounted(async () => {
   }
   await loadEntries();
 
-  unlistenNew = await onClipboardNew((entry) => {
-    entries.value.unshift(entry);
-  });
+  try {
+    unlistenNew = await onClipboardNew((entry) => {
+      entries.value.unshift(entry);
+    });
+  } catch (e) {
+    console.error("Failed to listen for clipboard events:", e);
+  }
 });
 
 onUnmounted(() => {
   unlistenNew?.();
+  clipboardStop().catch((e) => console.error("Failed to stop clipboard:", e));
 });
 
 async function loadEntries() {

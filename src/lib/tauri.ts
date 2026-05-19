@@ -410,7 +410,10 @@ export function clipboardStop(): Promise<void> {
 }
 
 export function clipboardList(search?: string, limit?: number): Promise<ClipboardEntry[]> {
-  return invoke<ClipboardEntry[]>("clipboard_list", { search, limit });
+  return invoke<ClipboardEntry[]>("clipboard_list", {
+    ...(search !== undefined ? { search } : {}),
+    ...(limit !== undefined ? { limit } : {}),
+  });
 }
 
 export function clipboardDelete(id: string): Promise<void> {
