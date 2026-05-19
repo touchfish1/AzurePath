@@ -385,3 +385,50 @@ export function onFileComplete(cb: (payload: { fileId: string; path: string; dow
 export function onFileError(cb: (payload: { fileId: string; error: string }) => void): Promise<UnlistenFn> {
   return listen("file:error", (event) => cb(event.payload as any));
 }
+
+// ============================================================
+// Clipboard Manager
+// ============================================================
+
+export interface ClipboardEntry {
+  id: string;
+  content_type: string;   // "text" | "image" | "file"
+  text_content: string | null;
+  image_path: string | null;
+  file_paths: string[] | null;
+  content_hash: string;
+  is_favorite: boolean;
+  created_at: string;
+}
+
+export function clipboardStart(): Promise<void> {
+  return invoke<void>("clipboard_start");
+}
+
+export function clipboardStop(): Promise<void> {
+  return invoke<void>("clipboard_stop");
+}
+
+export function clipboardList(search?: string, limit?: number): Promise<ClipboardEntry[]> {
+  return invoke<ClipboardEntry[]>("clipboard_list", { search, limit });
+}
+
+export function clipboardDelete(id: string): Promise<void> {
+  return invoke<void>("clipboard_delete", { id });
+}
+
+export function clipboardToggleFavorite(id: string): Promise<boolean> {
+  return invoke<boolean>("clipboard_toggle_favorite", { id });
+}
+
+export function clipboardCopy(id: string): Promise<void> {
+  return invoke<void>("clipboard_copy", { id });
+}
+
+export function clipboardClear(): Promise<void> {
+  return invoke<void>("clipboard_clear");
+}
+
+export function onClipboardNew(cb: (entry: ClipboardEntry) => void): Promise<UnlistenFn> {
+  return listen<ClipboardEntry>("clipboard:new", (event) => cb(event.payload));
+}

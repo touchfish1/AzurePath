@@ -38,6 +38,11 @@ const routes: RouteRecordRaw[] = [
     component: () => import("@/pages/chat/Page.vue"),
   },
   {
+    path: "/clipboard",
+    name: "clipboard",
+    component: () => import("@/pages/clipboard/Page.vue"),
+  },
+  {
     path: "/files",
     redirect: "/chat",
   },

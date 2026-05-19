@@ -8,6 +8,7 @@ import {
   Globe,
   History,
   MessageSquare,
+  Clipboard,
 } from "lucide-vue-next";
 
 const route = useRoute();
@@ -27,6 +28,7 @@ const navItems: NavItem[] = [
   { label: "DNS 查询", name: "dns", path: "/dns", icon: Globe },
   { label: "历史记录", name: "history", path: "/history", icon: History },
   { label: "消息", name: "chat", path: "/chat", icon: MessageSquare },
+  { label: "剪贴板", name: "clipboard", path: "/clipboard", icon: Clipboard },
 ];
 
 function isActive(path: string): boolean {
