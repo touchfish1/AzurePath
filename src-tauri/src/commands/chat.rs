@@ -132,6 +132,29 @@ pub async fn chat_history(limit: Option<u32>) -> Result<Vec<StoredMessage>, Stri
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+pub async fn chat_search(
+    keyword: String,
+    date_from: Option<String>,
+    date_to: Option<String>,
+) -> Result<Vec<StoredMessage>, String> {
+    let chat = CHAT.get().ok_or("Chat not initialized")?;
+    chat.store()
+        .search_messages(&keyword, date_from.as_deref(), date_to.as_deref())
+}
+
+#[tauri::command]
+pub async fn chat_delete(ids: Vec<String>) -> Result<(), String> {
+    let chat = CHAT.get().ok_or("Chat not initialized")?;
+    chat.store().delete_messages(&ids)
+}
+
+#[tauri::command]
+pub async fn chat_clear() -> Result<(), String> {
+    let chat = CHAT.get().ok_or("Chat not initialized")?;
+    chat.store().clear_history()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

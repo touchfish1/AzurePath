@@ -27,6 +27,9 @@ pub fn run() {
                 .build(),
         )
         .setup(|app| {
+            // Initialize activity store
+            let _ = commands::history::init_activity_store();
+
             use tauri::menu::{MenuBuilder, MenuItemBuilder};
             use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
@@ -105,6 +108,9 @@ pub fn run() {
             commands::chat::chat_broadcast,
             commands::chat::chat_messages,
             commands::chat::chat_history,
+            commands::chat::chat_search,
+            commands::chat::chat_delete,
+            commands::chat::chat_clear,
             commands::file_transfer::file_send,
             commands::file_transfer::file_accept,
             commands::file_transfer::file_reject,
@@ -116,6 +122,9 @@ pub fn run() {
             commands::clipboard::clipboard_stop,
             commands::clipboard::clipboard_list,
             commands::clipboard::clipboard_delete,
+            commands::clipboard::clipboard_export,
+            commands::clipboard::clipboard_sources,
+            commands::clipboard::clipboard_set_limit,
             commands::clipboard::clipboard_toggle_favorite,
             commands::clipboard::clipboard_copy,
             commands::clipboard::clipboard_clear,
@@ -127,6 +136,24 @@ pub fn run() {
             commands::network_sniffer::sniffer_list,
             commands::network_sniffer::sniffer_export,
             commands::network_sniffer::sniffer_presets,
+            // Phase 5 — Activity History
+            commands::history::activity_list,
+            commands::history::activity_search,
+            commands::history::activity_delete,
+            commands::history::activity_clear,
+            commands::history::activity_log,
+            // Phase 6 — Settings
+            commands::settings::get_settings,
+            commands::settings::save_settings,
+            // Phase 7 — Export
+            commands::export::export_chat,
+            commands::export::export_clipboard,
+            commands::export::export_settings,
+            // Phase 8 — Network Tools
+            commands::whois::whois_lookup,
+            commands::http_check::http_check,
+            commands::ssl_check::ssl_check,
+            commands::mac_lookup::mac_lookup,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

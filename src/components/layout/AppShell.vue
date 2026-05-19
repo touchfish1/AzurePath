@@ -1,18 +1,24 @@
 <script setup lang="ts">
-import { onMounted } from "vue";
+import { onMounted, ref } from "vue";
 import { useThemeStore } from "@/stores/theme";
 import { useKeyboardShortcuts } from "@/composables/useKeyboardShortcuts";
 import TitleBar from "./TitleBar.vue";
 import Sidebar from "./Sidebar.vue";
 import UpdateBanner from "@/components/UpdateBanner.vue";
+import Toast from "@/components/Toast.vue";
 
 const themeStore = useThemeStore();
+const sidebarCollapsed = ref(false);
 
 useKeyboardShortcuts();
 
 onMounted(() => {
   themeStore.init();
 });
+
+function onToggleCollapse() {
+  sidebarCollapsed.value = !sidebarCollapsed.value;
+}
 </script>
 
 <template>
@@ -26,7 +32,10 @@ onMounted(() => {
     <!-- Body: sidebar + main content -->
     <div class="flex flex-1 overflow-hidden">
       <!-- Sidebar -->
-      <Sidebar />
+      <Sidebar
+        :collapsed="sidebarCollapsed"
+        @toggle-collapse="onToggleCollapse"
+      />
 
       <!-- Main content area -->
       <main
@@ -35,5 +44,8 @@ onMounted(() => {
         <router-view />
       </main>
     </div>
+
+    <!-- Toast notifications -->
+    <Toast />
   </div>
 </template>

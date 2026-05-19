@@ -1,9 +1,13 @@
+pub mod activity;
 pub mod chat;
 pub mod clipboard;
 pub mod discovery;
 pub mod dns;
 pub mod file_transfer;
+pub mod http_check;
 pub mod ping;
 pub mod network_sniffer;
 pub mod port_scan;
+pub mod ssl_check;
 pub mod traceroute;
+pub mod whois;

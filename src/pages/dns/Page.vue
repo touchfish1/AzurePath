@@ -1,6 +1,15 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from "vue";
-import { Search } from "lucide-vue-next";
+import { Search, Copy } from "lucide-vue-next";
+import { useToastStore } from "@/stores/toast";
+
+const toast = useToastStore();
+
+function copyValue(value: string) {
+  navigator.clipboard.writeText(value).then(() => {
+    toast.add("success", "已复制");
+  });
+}
 import Button from "@/components/ui/button/Button.vue";
 import {
   dnsLookup,
@@ -162,6 +171,7 @@ onUnmounted(() => {
               <th class="px-5 py-3 text-left font-medium">类型</th>
               <th class="px-5 py-3 text-left font-medium">值</th>
               <th class="px-5 py-3 text-right font-medium">TTL</th>
+              <th class="px-5 py-3 text-left font-medium w-14">操作</th>
             </tr>
           </thead>
           <tbody>
@@ -185,6 +195,15 @@ onUnmounted(() => {
               </td>
               <td class="px-5 py-2.5 text-right font-mono text-ink-faint">
                 {{ rec.ttl }}
+              </td>
+              <td class="px-5 py-2.5">
+                <button
+                  class="rounded-lg p-1.5 text-ink-faint transition-colors hover:text-bamboo hover:bg-bamboo/5"
+                  title="复制记录值"
+                  @click="copyValue(rec.value)"
+                >
+                  <Copy class="h-3.5 w-3.5" />
+                </button>
               </td>
             </tr>
           </tbody>

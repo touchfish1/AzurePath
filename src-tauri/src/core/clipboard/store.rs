@@ -166,6 +166,72 @@ impl ClipboardStore {
         }
     }
 
+    pub fn delete_entries(&self, ids: &[String]) -> Result<(), String> {
+        if ids.is_empty() {
+            return Ok(());
+        }
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let placeholders: Vec<String> = ids.iter().map(|_| "?".to_string()).collect();
+        let sql = format!(
+            "DELETE FROM clipboard_entries WHERE id IN ({})",
+            placeholders.join(", ")
+        );
+        let params: Vec<&dyn rusqlite::types::ToSql> =
+            ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+        conn.execute(&sql, params.as_slice())
+            .map_err(|e| format!("Failed to delete entries: {}", e))?;
+        Ok(())
+    }
+
+    pub fn export_entries(&self, ids: &[String]) -> Result<Vec<ClipboardEntry>, String> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let placeholders: Vec<String> = ids.iter().map(|_| "?".to_string()).collect();
+        let sql = format!(
+            "SELECT id, content_type, text_content, image_path, file_paths, content_hash, is_favorite, created_at
+             FROM clipboard_entries WHERE id IN ({})
+             ORDER BY created_at DESC",
+            placeholders.join(", ")
+        );
+        let params: Vec<&dyn rusqlite::types::ToSql> =
+            ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+        let mut stmt = conn
+            .prepare(&sql)
+            .map_err(|e| format!("Failed to prepare export: {}", e))?;
+        let rows = stmt
+            .query_map(params.as_slice(), Self::map_row)
+            .map_err(|e| format!("Failed to query export: {}", e))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("Failed to read row: {}", e))?;
+        Ok(rows)
+    }
+
+    pub fn get_unique_sources(&self) -> Result<Vec<String>, String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare("SELECT DISTINCT content_type FROM clipboard_entries ORDER BY content_type")
+            .map_err(|e| format!("Failed to prepare: {}", e))?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|e| format!("Failed to query sources: {}", e))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("Failed to read row: {}", e))?;
+        Ok(rows)
+    }
+
+    pub fn set_max_entries(&self, limit: usize) -> Result<(), String> {
+        self.set_setting("max_entries", &limit.to_string())
+    }
+
+    pub fn get_max_entries(&self) -> Result<usize, String> {
+        match self.get_setting("max_entries")? {
+            Some(val) => val.parse::<usize>().or(Ok(MAX_ENTRIES as usize)),
+            None => Ok(MAX_ENTRIES as usize),
+        }
+    }
+
     pub fn delete(&self, id: &str) -> Result<(), String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         conn.execute("DELETE FROM clipboard_entries WHERE id = ?1", params![id])
@@ -208,6 +274,7 @@ impl ClipboardStore {
     }
 
     fn evict_old(&self) -> Result<(), String> {
+        let max = self.get_max_entries()? as u32;
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         conn.execute(
             "DELETE FROM clipboard_entries WHERE id IN (
@@ -216,7 +283,7 @@ impl ClipboardStore {
                 ORDER BY created_at ASC
                 LIMIT MAX(0, (SELECT COUNT(*) - ?1 FROM clipboard_entries WHERE is_favorite = 0))
             )",
-            params![MAX_ENTRIES],
+            params![max],
         )
         .map_err(|e| format!("Failed to evict old entries: {}", e))?;
         Ok(())

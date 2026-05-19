@@ -16,6 +16,8 @@ import {
   Clock,
   Search,
   Trash2,
+  ArrowUp,
+  ArrowDown,
 } from "lucide-vue-next";
 import { formatTime, truncate } from "@/lib/format";
 import Button from "@/components/ui/button/Button.vue";
@@ -40,6 +42,37 @@ const peerCount = ref(0);
 const allEntries = ref<ClipboardEntry[]>([]);
 const loading = ref(true);
 const selectedIds = ref<Set<string>>(new Set());
+
+// Sorting state
+const sortKey = ref<string | null>(null);
+const sortDir = ref<"asc" | "desc" | null>(null);
+
+function toggleSort(key: string) {
+  if (sortKey.value === key) {
+    if (sortDir.value === "asc") {
+      sortDir.value = "desc";
+    } else if (sortDir.value === "desc") {
+      sortKey.value = null;
+      sortDir.value = null;
+    }
+  } else {
+    sortKey.value = key;
+    sortDir.value = "asc";
+  }
+}
+
+const sortedEntries = computed(() => {
+  const items = [...filteredEntries.value];
+  if (!sortKey.value || !sortDir.value) return items;
+  return items.sort((a: any, b: any) => {
+    const valA = a[sortKey.value as keyof typeof a];
+    const valB = b[sortKey.value as keyof typeof b];
+    if (valA == null) return 1;
+    if (valB == null) return -1;
+    const cmp = typeof valA === "number" ? valA - valB : String(valA).localeCompare(String(valB));
+    return sortDir.value === "asc" ? cmp : -cmp;
+  });
+});
 
 interface StatCard {
   label: string;
@@ -73,7 +106,7 @@ const filteredEntries = computed(() => {
 
 // Virtual list for large entry lists
 const { list: virtualEntries, containerProps, wrapperProps } = useVirtualList(
-  filteredEntries,
+  sortedEntries,
   { itemHeight: 80, overscan: 10 }
 );
 
@@ -313,9 +346,19 @@ async function clearAll() {
         <div v-else class="mt-8 flex flex-col flex-1 overflow-hidden">
           <div class="mb-3 flex items-center justify-between shrink-0">
             <p class="text-xs text-ink-faint">
-              {{ filteredEntries.length }} 条记录
+              {{ sortedEntries.length }} 条记录
               <span v-if="selectedIds.size > 0" class="ml-2 text-bamboo">{{ selectedIds.size }} 已选择</span>
             </p>
+            <div class="flex items-center gap-2">
+              <button
+                class="flex items-center gap-1 rounded px-2 py-0.5 text-xs text-ink-faint transition-colors hover:bg-paper-deep/50 hover:text-ink"
+                @click="toggleSort('created_at')"
+                :title="sortDir === 'asc' ? '最早在前' : '最新在前'"
+              >
+                时间
+                <ArrowUp v-if="sortKey === 'created_at' && sortDir === 'asc'" class="h-3 w-3" />
+                <ArrowDown v-else-if="sortKey === 'created_at' && sortDir === 'desc'" class="h-3 w-3" />
+              </button>
             <div class="flex gap-2">
               <Button v-if="selectedIds.size > 0" variant="danger" size="sm" @click="deleteSelected">
                 <Trash2 class="mr-1 h-3.5 w-3.5" />删除选中
@@ -324,9 +367,10 @@ async function clearAll() {
                 <Trash2 class="mr-1 h-3.5 w-3.5" />清空全部
               </Button>
             </div>
+            </div>
           </div>
 
-          <div v-if="filteredEntries.length === 0" class="flex items-center justify-center rounded-xl border border-dashed border-paper-deep/30 py-12 text-sm text-ink-faint">
+          <div v-if="sortedEntries.length === 0" class="flex items-center justify-center rounded-xl border border-dashed border-paper-deep/30 py-12 text-sm text-ink-faint">
             <div class="text-center">
               <component :is="activeTab === 'favorites' ? Star : Clipboard" class="mx-auto h-6 w-6 mb-2 opacity-40" />
               <p>{{ activeTab === 'favorites' ? '暂无收藏内容' : '暂无剪贴板记录' }}</p>

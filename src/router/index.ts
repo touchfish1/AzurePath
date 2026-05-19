@@ -57,6 +57,11 @@ const routes: RouteRecordRaw[] = [
     name: "toolbox",
     component: () => import("@/pages/toolbox/Page.vue"),
   },
+  {
+    path: "/settings",
+    name: "settings",
+    component: () => import("@/pages/settings/Page.vue"),
+  },
 ];
 
 const router = createRouter({

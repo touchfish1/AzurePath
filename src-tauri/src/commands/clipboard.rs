@@ -1,6 +1,7 @@
 use crate::core::clipboard::{ClipboardMonitor, ClipboardStore};
 use crate::types::clipboard::ClipboardEntry;
 use crate::types::clipboard::MAX_CLIPBOARD_BYTES;
+use crate::core::utils::home_dir;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use tauri::AppHandle;
@@ -63,9 +64,9 @@ pub async fn clipboard_list(search: Option<String>, limit: Option<u32>) -> Resul
 }
 
 #[tauri::command]
-pub async fn clipboard_delete(id: String) -> Result<(), String> {
+pub async fn clipboard_delete(ids: Vec<String>) -> Result<(), String> {
     let store = CLIPBOARD_STORE.get().ok_or("Clipboard not initialized")?;
-    store.delete(&id)
+    store.delete_entries(&ids)
 }
 
 #[tauri::command]
@@ -142,6 +143,74 @@ pub async fn clipboard_set_interval(ms: u64) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+pub async fn clipboard_export(ids: Vec<String>, format: String) -> Result<String, String> {
+    let store = CLIPBOARD_STORE.get().ok_or("Clipboard not initialized")?;
+    let entries = store.export_entries(&ids)?;
+
+    // Determine export directory
+    let export_dir = home_dir()
+        .ok_or_else(|| "Cannot find home directory".to_string())?
+        .join("AzurePath")
+        .join("exports");
+    std::fs::create_dir_all(&export_dir)
+        .map_err(|e| format!("Failed to create exports directory: {}", e))?;
+
+    let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
+
+    match format.to_lowercase().as_str() {
+        "json" => {
+            let content = serde_json::to_string_pretty(&entries)
+                .map_err(|e| format!("Failed to serialize: {}", e))?;
+            let file_path = export_dir.join(format!("clipboard_{}.json", timestamp));
+            std::fs::write(&file_path, content)
+                .map_err(|e| format!("Failed to write file: {}", e))?;
+            Ok(file_path.to_string_lossy().to_string())
+        }
+        "txt" => {
+            let mut content = String::new();
+            for entry in &entries {
+                content.push_str(&format!("=== Clipboard Entry ===\n"));
+                content.push_str(&format!("ID: {}\n", entry.id));
+                content.push_str(&format!("Type: {}\n", entry.content_type));
+                if let Some(ref text) = entry.text_content {
+                    content.push_str(&format!("Content: {}\n", text));
+                }
+                if let Some(ref img) = entry.image_path {
+                    content.push_str(&format!("Image: {}\n", img));
+                }
+                if let Some(ref files) = entry.file_paths {
+                    content.push_str(&format!("Files: {}\n", files.join(", ")));
+                }
+                content.push_str(&format!("Created: {}\n\n", entry.created_at));
+            }
+            let file_path = export_dir.join(format!("clipboard_{}.txt", timestamp));
+            std::fs::write(&file_path, content)
+                .map_err(|e| format!("Failed to write file: {}", e))?;
+            Ok(file_path.to_string_lossy().to_string())
+        }
+        _ => Err(format!("Unsupported format: {}. Supported formats: json, txt", format)),
+    }
+}
+
+#[tauri::command]
+pub async fn clipboard_sources() -> Result<Vec<String>, String> {
+    let store = CLIPBOARD_STORE.get().ok_or("Clipboard not initialized")?;
+    store.get_unique_sources()
+}
+
+#[tauri::command]
+pub async fn clipboard_set_limit(limit: usize) -> Result<(), String> {
+    if limit < 10 {
+        return Err("Minimum limit is 10 entries".to_string());
+    }
+    if limit > 10000 {
+        return Err("Maximum limit is 10000 entries".to_string());
+    }
+    let store = CLIPBOARD_STORE.get().ok_or("Clipboard not initialized")?;
+    store.set_max_entries(limit)
+}
+
 /// Handle incoming ClipboardSync frames from LAN peers.
 pub(crate) async fn handle_frame(incoming: &crate::core::connection::IncomingFrame, app: &AppHandle) {
     if let crate::types::chat::Frame::ClipboardSync { entries } = &incoming.frame {
@@ -189,7 +258,31 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_fails_before_start() {
-        let err = clipboard_delete("any-id".into()).await.unwrap_err();
+        let err = clipboard_delete(vec!["any-id".into()]).await.unwrap_err();
+        assert_eq!(err, "Clipboard not initialized");
+    }
+
+    #[tokio::test]
+    async fn test_delete_batch_fails_before_start() {
+        let err = clipboard_delete(vec![]).await.unwrap_err();
+        assert_eq!(err, "Clipboard not initialized");
+    }
+
+    #[tokio::test]
+    async fn test_export_fails_before_start() {
+        let err = clipboard_export(vec![], "json".into()).await.unwrap_err();
+        assert_eq!(err, "Clipboard not initialized");
+    }
+
+    #[tokio::test]
+    async fn test_sources_fails_before_start() {
+        let err = clipboard_sources().await.unwrap_err();
+        assert_eq!(err, "Clipboard not initialized");
+    }
+
+    #[tokio::test]
+    async fn test_set_limit_fails_before_start() {
+        let err = clipboard_set_limit(100).await.unwrap_err();
         assert_eq!(err, "Clipboard not initialized");
     }
 
@@ -448,7 +541,7 @@ mod tests {
         assert!(list.is_empty(), "searched list should be empty with no entries");
 
         // delete non-existent is no-op
-        assert!(clipboard_delete("no-such-id".into()).await.is_ok());
+        assert!(clipboard_delete(vec!["no-such-id".into()]).await.is_ok());
 
         // toggle_favorite on non-existent fails
         assert!(clipboard_toggle_favorite("no-such-id".into()).await.is_err());

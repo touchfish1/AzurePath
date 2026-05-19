@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from "vue";
-import { Send, MessageSquare, Wifi, WifiOff, Paperclip, FileUp, Download, XCircle, X } from "lucide-vue-next";
+import { Send, MessageSquare, Wifi, WifiOff, Paperclip, FileUp, Download, XCircle, X, History, Search, Trash2, Calendar } from "lucide-vue-next";
 import Button from "@/components/ui/button/Button.vue";
 import {
   lanInit,
   chatSend,
   chatBroadcast,
   chatMessages,
+  chatSearch,
+  chatDelete,
+  chatClear,
   fileSend,
   fileBroadcast,
   fileAccept,
@@ -81,6 +84,57 @@ const canSendFile = computed(() =>
 const canSendText = computed(() =>
   !sending.value && inputText.value.trim().length > 0
 );
+
+// ─── History Management ──────────────────────────────────────
+const showHistory = ref(false);
+const historyKeyword = ref("");
+const historyDateFrom = ref("");
+const historyDateTo = ref("");
+const historyMessages = ref<StoredMessage[]>([]);
+const historyLoading = ref(false);
+
+async function openHistory() {
+  showHistory.value = true;
+  historyKeyword.value = "";
+  historyDateFrom.value = "";
+  historyDateTo.value = "";
+  await loadHistoryMessages();
+}
+
+async function loadHistoryMessages() {
+  historyLoading.value = true;
+  try {
+    historyMessages.value = await chatSearch(
+      historyKeyword.value,
+      historyDateFrom.value || undefined,
+      historyDateTo.value || undefined,
+    );
+  } catch (e) {
+    console.error("Failed to search history:", e);
+  } finally {
+    historyLoading.value = false;
+  }
+}
+
+async function deleteHistoryMessage(id: number) {
+  try {
+    await chatDelete([id]);
+    historyMessages.value = historyMessages.value.filter((m) => Number(m.id) !== id);
+  } catch (e) {
+    console.error("Failed to delete history message:", e);
+  }
+}
+
+async function clearAllHistory() {
+  if (!confirm("确定清空所有聊天历史？此操作不可撤销。")) return;
+  try {
+    await chatClear();
+    historyMessages.value = [];
+    messages.value = await chatMessages();
+  } catch (e) {
+    console.error("Failed to clear history:", e);
+  }
+}
 
 onMounted(async () => {
   if (!initialized.value) {
@@ -275,7 +329,7 @@ function handleReject() {
 }
 
 function statusClass(status: string): string {
-  if (status === "completed") return "bg-bamboo/10 text-bamboo";
+  if (status === "completed") return "bg-green-100 text-green-600";
   if (status === "transferring") return "bg-blue-100 text-blue-600";
   if (status === "broadcasting") return "bg-purple-100 text-purple-600";
   if (status === "sending") return "bg-gray-100 text-gray-500";
@@ -302,11 +356,17 @@ async function copyDownloadUrl(t: FileTransfer) {
 <template>
   <div class="flex h-full flex-col animate-view-fade">
     <!-- Header -->
-    <div class="border-b border-paper-deep/50 px-6 py-3">
-      <h1 class="text-xl font-display font-bold text-ink">聊天</h1>
-      <p class="text-xs text-ink-faint">
-        在线: {{ onlinePeers.length }} / 共 {{ peers.length }}
-      </p>
+    <div class="flex items-center justify-between border-b border-paper-deep/50 px-6 py-3">
+      <div>
+        <h1 class="text-xl font-display font-bold text-ink">聊天</h1>
+        <p class="text-xs text-ink-faint">
+          在线: {{ onlinePeers.length }} / 共 {{ peers.length }}
+        </p>
+      </div>
+      <Button variant="ghost" size="sm" @click="openHistory">
+        <History class="mr-1 h-3.5 w-3.5" />
+        历史记录
+      </Button>
     </div>
 
     <div class="flex flex-1 overflow-hidden">
@@ -438,11 +498,17 @@ async function copyDownloadUrl(t: FileTransfer) {
                   {{ formatSize(t.received) }} / {{ formatSize(t.size) }}
                 </span>
               </div>
-              <div v-if="t.status === 'transferring' && t.size > 0" class="mt-2 h-1.5 rounded-full bg-paper-deep/30 overflow-hidden">
-                <div
-                  class="h-full rounded-full bg-bamboo transition-all duration-300"
-                  :style="{ width: progressPercent(t.received, t.size) + '%' }"
-                />
+              <div v-if="t.status === 'transferring' && t.size > 0" class="mt-2">
+                <div class="flex items-center gap-2 text-xs text-ink-faint mb-1">
+                  <span>{{ formatSize(t.received) }} / {{ formatSize(t.size) }}</span>
+                  <span>({{ progressPercent(t.received, t.size) }}%)</span>
+                </div>
+                <div class="h-2 rounded-full bg-stone-100 dark:bg-stone-700 overflow-hidden">
+                  <div
+                    class="h-full rounded-full bg-bamboo transition-all duration-300"
+                    :style="{ width: progressPercent(t.received, t.size) + '%' }"
+                  />
+                </div>
               </div>
               <div class="mt-1 text-xs text-ink-faint">
                 {{ formatTime(t.created_at) }}
@@ -558,6 +624,121 @@ async function copyDownloadUrl(t: FileTransfer) {
             <Button @click="handleAccept" aria-label="接受文件">
               <Download class="mr-1.5 h-3.5 w-3.5" />
               接受
+            </Button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- History Modal -->
+    <Teleport to="body">
+      <div
+        v-if="showHistory"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm"
+        @click.self="showHistory = false"
+      >
+        <div class="noise-bg flex max-h-[80vh] w-full max-w-2xl flex-col rounded-xl border border-paper-deep/60 bg-paper p-6 shadow-lg">
+          <!-- Modal header -->
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-base font-semibold text-ink">聊天历史记录</h3>
+            <button class="text-ink-faint hover:text-ink" @click="showHistory = false">
+              <X class="h-4 w-4" />
+            </button>
+          </div>
+
+          <!-- Search and filters -->
+          <div class="flex items-end gap-3 mb-4">
+            <div class="flex-1">
+              <label class="mb-1 block text-xs font-medium text-ink-soft">关键词搜索</label>
+              <div class="relative">
+                <Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-faint" />
+                <input
+                  v-model="historyKeyword"
+                  placeholder="搜索消息内容..."
+                  class="w-full rounded-lg border border-paper-deep/40 bg-paper-warm/50 pl-9 pr-3 py-2 text-sm text-ink outline-none placeholder:text-ink-faint/40 focus:border-bamboo/40"
+                  @keyup.enter="loadHistoryMessages"
+                />
+              </div>
+            </div>
+            <div>
+              <label class="mb-1 block text-xs font-medium text-ink-soft">从</label>
+              <div class="relative">
+                <Calendar class="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-faint pointer-events-none" />
+                <input
+                  v-model="historyDateFrom"
+                  type="date"
+                  class="w-40 rounded-lg border border-paper-deep/40 bg-paper-warm/50 pl-8 pr-3 py-2 text-sm text-ink outline-none focus:border-bamboo/40"
+                />
+              </div>
+            </div>
+            <div>
+              <label class="mb-1 block text-xs font-medium text-ink-soft">到</label>
+              <div class="relative">
+                <Calendar class="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-faint pointer-events-none" />
+                <input
+                  v-model="historyDateTo"
+                  type="date"
+                  class="w-40 rounded-lg border border-paper-deep/40 bg-paper-warm/50 pl-8 pr-3 py-2 text-sm text-ink outline-none focus:border-bamboo/40"
+                />
+              </div>
+            </div>
+            <Button size="sm" @click="loadHistoryMessages">
+              <Search class="mr-1 h-3.5 w-3.5" />
+              搜索
+            </Button>
+          </div>
+
+          <!-- Message list -->
+          <div class="flex-1 overflow-y-auto min-h-0 space-y-2">
+            <!-- Loading -->
+            <div v-if="historyLoading" class="flex items-center justify-center py-12 text-sm text-ink-faint">
+              加载中...
+            </div>
+
+            <!-- Empty -->
+            <div v-else-if="historyMessages.length === 0" class="flex items-center justify-center py-12 text-sm text-ink-faint">
+              <div class="text-center">
+                <History class="mx-auto h-8 w-8 mb-2 opacity-40" />
+                <p>暂无历史消息</p>
+              </div>
+            </div>
+
+            <!-- Messages -->
+            <div
+              v-for="msg in historyMessages"
+              :key="msg.id"
+              class="flex items-start gap-3 rounded-xl border border-paper-deep/20 bg-paper-warm/30 p-3 transition-colors hover:bg-paper-warm/60"
+            >
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 mb-1">
+                  <span class="text-xs font-medium text-ink-soft">
+                    {{ msg.peer_name }}
+                  </span>
+                  <span class="text-xs text-ink-faint">{{ msg.peer_ip }}</span>
+                  <span class="text-xs text-ink-faint">{{ formatTime(msg.created_at) }}</span>
+                  <span v-if="msg.is_broadcast" class="inline-block rounded-full px-1.5 py-0.5 text-xs bg-bamboo/20 text-bamboo">广播</span>
+                  <span v-if="msg.is_incoming" class="text-xs text-ink-faint">接收</span>
+                  <span v-else class="text-xs text-ink-faint">发送</span>
+                </div>
+                <p class="text-sm text-ink whitespace-pre-wrap break-words line-clamp-2">{{ msg.content }}</p>
+              </div>
+              <button
+                class="shrink-0 rounded-lg p-1.5 text-ink-faint transition-colors hover:text-red-500 hover:bg-red-500/10"
+                title="删除"
+                aria-label="删除此消息"
+                @click="deleteHistoryMessage(Number(msg.id))"
+              >
+                <Trash2 class="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+
+          <!-- Footer -->
+          <div class="flex items-center justify-between mt-4 pt-3 border-t border-paper-deep/20">
+            <span class="text-xs text-ink-faint">共 {{ historyMessages.length }} 条记录</span>
+            <Button variant="danger" size="sm" @click="clearAllHistory">
+              <Trash2 class="mr-1 h-3.5 w-3.5" />
+              清空全部
             </Button>
           </div>
         </div>

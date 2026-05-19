@@ -6,6 +6,7 @@ import {
   X,
   Check,
   Loader2,
+  Copy,
   ArrowUpFromLine,
   ArrowDownToLine,
 } from "lucide-vue-next";
@@ -57,7 +58,7 @@ function peerLabel(peerId: string): string {
 const statusConfig = computed(() => (status: string) => {
   switch (status) {
     case "completed":
-      return { label: "已完成", class: "text-bamboo bg-bamboo/10" };
+      return { label: "已完成", class: "text-green-600 bg-green-100" };
     case "transferring":
       return { label: "传输中", class: "text-yellow-500 bg-yellow-500/10" };
     case "pending":
@@ -130,13 +131,27 @@ async function handleDownload(fileId: string) {
   try {
     const url = await getFileDownloadUrl(fileId);
     if (url) {
-      // Open the download URL in the default browser
       window.open(url, "_blank");
     }
   } catch (e) {
     console.error("Download error:", e);
   } finally {
     downloadingId.value = null;
+  }
+}
+
+const copyBtnTexts = ref<Record<string, string>>({});
+
+async function copyFileDownloadUrl(fileId: string) {
+  try {
+    const url = await getFileDownloadUrl(fileId);
+    if (url) {
+      await navigator.clipboard.writeText(url);
+      copyBtnTexts.value[fileId] = "已复制!";
+      setTimeout(() => { copyBtnTexts.value[fileId] = "复制下载链接"; }, 2000);
+    }
+  } catch (e) {
+    console.error("Failed to copy download URL:", e);
   }
 }
 </script>
@@ -260,11 +275,11 @@ async function handleDownload(fileId: string) {
 
               <!-- Progress bar for active transfers -->
               <div v-if="t.status === 'transferring' && t.size > 0" class="mt-3 max-w-sm">
-                <div class="flex items-center gap-2 text-xs text-ink-faint mb-1">
+                <div class="flex items-center justify-between text-xs text-ink-faint mb-1">
                   <span>{{ formatSize(t.received) }} / {{ formatSize(t.size) }}</span>
-                  <span>({{ progressPercent(t.received, t.size) }}%)</span>
+                  <span class="font-medium text-ink-soft">{{ progressPercent(t.received, t.size) }}%</span>
                 </div>
-                <div class="h-2 rounded-full bg-paper-deep/20 overflow-hidden">
+                <div class="h-2 rounded-full bg-stone-100 dark:bg-stone-700 overflow-hidden">
                   <div
                     class="h-full rounded-full bg-bamboo transition-all duration-300"
                     :style="{ width: progressPercent(t.received, t.size) + '%' }"
@@ -273,8 +288,8 @@ async function handleDownload(fileId: string) {
               </div>
 
               <!-- Size info for completed/other -->
-              <div v-else-if="t.status === 'completed'" class="mt-1 text-xs text-bamboo">
-                {{ formatSize(t.size) }} · 传输完成
+              <div v-else-if="t.status === 'completed'" class="mt-1 flex items-center gap-2">
+                <span class="text-xs text-green-600">{{ formatSize(t.size) }} · 完成</span>
               </div>
             </div>
 
@@ -301,16 +316,25 @@ async function handleDownload(fileId: string) {
               </template>
 
               <!-- Completed: Download -->
-              <button
-                v-if="t.status === 'completed'"
-                class="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium text-bamboo transition-colors hover:bg-bamboo/10"
-                :disabled="downloadingId === t.id"
-                @click="handleDownload(t.id)"
-              >
-                <Loader2 v-if="downloadingId === t.id" class="h-3.5 w-3.5 animate-spin" />
-                <Download v-else class="h-3.5 w-3.5" />
-                {{ downloadingId === t.id ? '获取中...' : '下载' }}
-              </button>
+              <template v-if="t.status === 'completed'">
+                <button
+                  class="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium text-bamboo transition-colors hover:bg-bamboo/10"
+                  :disabled="downloadingId === t.id"
+                  @click="handleDownload(t.id)"
+                >
+                  <Loader2 v-if="downloadingId === t.id" class="h-3.5 w-3.5 animate-spin" />
+                  <Download v-else class="h-3.5 w-3.5" />
+                  {{ downloadingId === t.id ? '获取中...' : '下载' }}
+                </button>
+                <button
+                  class="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium text-ink-soft transition-colors hover:bg-paper-deep/30 hover:text-ink"
+                  @click="copyFileDownloadUrl(t.id)"
+                  :title="copyBtnTexts[t.id] || '复制下载链接'"
+                >
+                  <Copy class="h-3.5 w-3.5" />
+                  {{ copyBtnTexts[t.id] || '复制链接' }}
+                </button>
+              </template>
             </div>
           </div>
         </div>

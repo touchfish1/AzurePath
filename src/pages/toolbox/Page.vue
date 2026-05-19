@@ -8,11 +8,13 @@ import {
   Search,
   Copy,
   Check,
+  Wifi,
 } from "lucide-vue-next";
 import Button from "@/components/ui/button/Button.vue";
+import QRCode from "qrcode";
 
 // ─── Tab System ───────────────────────────────────────────────
-type ToolTab = "subnet" | "base64" | "url" | "hash" | "port";
+type ToolTab = "subnet" | "base64" | "url" | "hash" | "port" | "wifi";
 
 interface ToolTabDef {
   key: ToolTab;
@@ -26,6 +28,7 @@ const tabs: ToolTabDef[] = [
   { key: "url", label: "URL", icon: Link },
   { key: "hash", label: "Hash", icon: Fingerprint },
   { key: "port", label: "端口速查", icon: Search },
+  { key: "wifi", label: "WiFi QR", icon: Wifi },
 ];
 
 const activeTab = ref<ToolTab>("subnet");
@@ -481,6 +484,58 @@ function lookupPort() {
     };
   }
 }
+
+// ─── 6. WiFi QR Generator ─────────────────────────────────────
+const wifiSsid = ref("");
+const wifiPassword = ref("");
+const wifiEncryption = ref<"WPA" | "WPA2" | "WPA3" | "none">("WPA2");
+const wifiQrDataUrl = ref("");
+const wifiQrError = ref("");
+const wifiQrGenerating = ref(false);
+
+const encryptionOptions = [
+  { value: "WPA" as const, label: "WPA" },
+  { value: "WPA2" as const, label: "WPA2" },
+  { value: "WPA3" as const, label: "WPA3" },
+  { value: "none" as const, label: "无密码" },
+];
+
+async function generateWifiQr() {
+  wifiQrError.value = "";
+  wifiQrDataUrl.value = "";
+
+  if (!wifiSsid.value.trim()) {
+    wifiQrError.value = "请输入 WiFi 名称 (SSID)";
+    return;
+  }
+
+  const ssid = wifiSsid.value.trim();
+  const password = wifiPassword.value;
+  const enc = wifiEncryption.value;
+
+  let wifiString: string;
+  if (enc === "none") {
+    wifiString = `WIFI:T:nopass;S:${ssid};P:${password};;`;
+  } else {
+    wifiString = `WIFI:T:${enc};S:${ssid};P:${password};;`;
+  }
+
+  wifiQrGenerating.value = true;
+  try {
+    wifiQrDataUrl.value = await QRCode.toDataURL(wifiString, {
+      width: 256,
+      margin: 2,
+      color: {
+        dark: "#1e1e2e",
+        light: "#ffffff",
+      },
+    });
+  } catch (e) {
+    wifiQrError.value = "QR 码生成失败：" + String(e);
+  } finally {
+    wifiQrGenerating.value = false;
+  }
+}
 </script>
 
 <template>
@@ -706,6 +761,68 @@ function lookupPort() {
             </div>
             <div class="rounded-xl border border-paper-deep/20 bg-paper-warm/30 p-4">
               <pre class="whitespace-pre-wrap break-all text-sm text-ink font-mono select-all">{{ hashResult }}</pre>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- WiFi QR Generator -->
+      <div v-if="activeTab === 'wifi'" class="max-w-xl">
+        <h3 class="text-lg font-display font-bold text-ink">WiFi QR 生成器</h3>
+        <p class="mt-1 text-sm text-ink-faint">生成 WiFi 连接二维码，手机扫码即可连接。</p>
+
+        <div class="mt-5 space-y-4">
+          <div>
+            <label class="mb-1.5 block text-xs font-medium text-ink-soft">WiFi 名称 (SSID)</label>
+            <input
+              v-model="wifiSsid"
+              type="text"
+              placeholder="输入 WiFi 名称..."
+              class="w-full rounded-lg border border-paper-deep/40 bg-paper-warm/50 px-3 py-2 text-sm text-ink outline-none transition-colors placeholder:text-ink-faint/40 focus:border-bamboo/40 focus:bg-paper-warm/80"
+            />
+          </div>
+          <div>
+            <label class="mb-1.5 block text-xs font-medium text-ink-soft">密码</label>
+            <input
+              v-model="wifiPassword"
+              type="text"
+              placeholder="输入 WiFi 密码（可选）"
+              class="w-full rounded-lg border border-paper-deep/40 bg-paper-warm/50 px-3 py-2 text-sm text-ink outline-none transition-colors placeholder:text-ink-faint/40 focus:border-bamboo/40 focus:bg-paper-warm/80"
+            />
+          </div>
+          <div>
+            <label class="mb-1.5 block text-xs font-medium text-ink-soft">加密类型</label>
+            <div class="flex flex-wrap gap-2">
+              <button
+                v-for="opt in encryptionOptions"
+                :key="opt.value"
+                class="rounded-lg px-3 py-1.5 text-sm font-medium transition-colors"
+                :class="wifiEncryption === opt.value ? 'bg-bamboo/15 text-bamboo ring-1 ring-bamboo/30' : 'bg-paper-deep/20 text-ink-soft hover:bg-paper-deep/40 hover:text-ink'"
+                @click="wifiEncryption = opt.value"
+              >
+                {{ opt.label }}
+              </button>
+            </div>
+          </div>
+          <Button :disabled="wifiQrGenerating" @click="generateWifiQr">
+            {{ wifiQrGenerating ? '生成中...' : '生成二维码' }}
+          </Button>
+
+          <p v-if="wifiQrError" class="text-sm text-red-500">{{ wifiQrError }}</p>
+
+          <div v-if="wifiQrDataUrl" class="mt-4 space-y-4">
+            <div class="flex justify-center">
+              <div class="inline-block rounded-xl border border-paper-deep/20 bg-white p-4 shadow-sm">
+                <img :src="wifiQrDataUrl" alt="WiFi QR Code" class="h-48 w-48" />
+              </div>
+            </div>
+            <div class="rounded-xl border border-paper-deep/20 bg-paper-warm/30 p-4 text-sm text-ink-soft">
+              <p>使用手机相机或 WiFi 扫码工具扫描上方二维码即可连接 WiFi。</p>
+              <p class="mt-1 text-xs text-ink-faint">
+                网络: {{ wifiSsid.trim() }}
+                <template v-if="wifiEncryption !== 'none'"> · 加密: {{ wifiEncryption }}</template>
+                <template v-else> · 无密码</template>
+              </p>
             </div>
           </div>
         </div>

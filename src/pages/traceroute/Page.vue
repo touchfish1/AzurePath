@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted } from "vue";
-import { Play, Square, Route } from "lucide-vue-next";
+import { Play, Square, Route, Copy } from "lucide-vue-next";
 import Button from "@/components/ui/button/Button.vue";
 import { useTracerouteStore } from "@/stores/traceroute";
+import { useToastStore } from "@/stores/toast";
+
+const toast = useToastStore();
 
 const store = useTracerouteStore();
 
@@ -15,6 +18,13 @@ function formatAddr(addr: string | null, hostname: string | null): string {
   if (!addr) return "*";
   if (hostname && hostname !== addr) return `${hostname} (${addr})`;
   return addr;
+}
+
+function copyAddr(addr: string | null) {
+  if (!addr) return;
+  navigator.clipboard.writeText(addr).then(() => {
+    toast.add("success", "已复制");
+  });
 }
 
 onMounted(async () => {
@@ -109,6 +119,7 @@ onUnmounted(() => {
               <th class="px-5 py-3 text-right font-medium">延迟 1</th>
               <th class="px-5 py-3 text-right font-medium">延迟 2</th>
               <th class="px-5 py-3 text-right font-medium">延迟 3</th>
+              <th class="px-5 py-3 text-left font-medium w-14">操作</th>
             </tr>
           </thead>
           <tbody>
@@ -134,6 +145,16 @@ onUnmounted(() => {
                 class="px-5 py-2.5 text-right font-mono text-ink-faint"
               >
                 *
+              </td>
+              <td class="px-5 py-2.5">
+                <button
+                  class="rounded-lg p-1.5 text-ink-faint transition-colors hover:text-bamboo hover:bg-bamboo/5"
+                  title="复制地址"
+                  :disabled="!h.addr"
+                  @click="copyAddr(h.addr)"
+                >
+                  <Copy class="h-3.5 w-3.5" />
+                </button>
               </td>
             </tr>
           </tbody>

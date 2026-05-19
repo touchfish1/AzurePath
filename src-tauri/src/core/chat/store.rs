@@ -135,6 +135,90 @@ impl ChatStore {
         })
     }
 
+    pub fn search_messages(
+        &self,
+        keyword: &str,
+        date_from: Option<&str>,
+        date_to: Option<&str>,
+    ) -> Result<Vec<StoredMessage>, String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+
+        let mut conditions = Vec::new();
+        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+
+        if !keyword.is_empty() {
+            let escaped = keyword
+                .replace("\\", "\\\\")
+                .replace("%", "\\%")
+                .replace("_", "\\_");
+            conditions.push(format!("(content LIKE ?{} ESCAPE '\\')", params.len() + 1));
+            params.push(Box::new(format!("%{}%", escaped)));
+        }
+        if let Some(from) = date_from {
+            conditions.push(format!("(created_at >= ?{})", params.len() + 1));
+            params.push(Box::new(from.to_string()));
+        }
+        if let Some(to) = date_to {
+            conditions.push(format!("(created_at <= ?{})", params.len() + 1));
+            params.push(Box::new(to.to_string()));
+        }
+
+        let where_clause = if conditions.is_empty() {
+            String::new()
+        } else {
+            format!("WHERE {}", conditions.join(" AND "))
+        };
+
+        let sql = format!(
+            "SELECT id, peer_id, peer_name, peer_ip, peer_os, content, is_broadcast, is_incoming, file_ref, created_at
+             FROM messages {}
+             ORDER BY created_at DESC
+             LIMIT 200",
+            where_clause
+        );
+
+        let mut stmt = conn
+            .prepare(&sql)
+            .map_err(|e| format!("Failed to prepare search query: {}", e))?;
+
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
+
+        let rows = stmt
+            .query_map(param_refs.as_slice(), Self::map_row)
+            .map_err(|e| format!("Failed to query search: {}", e))?;
+
+        let mut messages = Vec::new();
+        for row in rows {
+            messages.push(row.map_err(|e| format!("Failed to read row: {}", e))?);
+        }
+        Ok(messages)
+    }
+
+    pub fn delete_messages(&self, ids: &[String]) -> Result<(), String> {
+        if ids.is_empty() {
+            return Ok(());
+        }
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let placeholders: Vec<String> = ids.iter().map(|_| "?".to_string()).collect();
+        let sql = format!(
+            "DELETE FROM messages WHERE id IN ({})",
+            placeholders.join(", ")
+        );
+        let params: Vec<&dyn rusqlite::types::ToSql> =
+            ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+        conn.execute(&sql, params.as_slice())
+            .map_err(|e| format!("Failed to delete messages: {}", e))?;
+        Ok(())
+    }
+
+    pub fn clear_history(&self) -> Result<(), String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        conn.execute_batch("DELETE FROM messages")
+            .map_err(|e| format!("Failed to clear history: {}", e))?;
+        Ok(())
+    }
+
     pub fn upsert_peer(&self, peer: &PeerInfo) -> Result<(), String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         conn.execute(

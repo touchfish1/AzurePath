@@ -538,3 +538,41 @@ export function onSnifferComplete(cb: (p: { taskId: string }) => void): Promise<
 export function onSnifferError(cb: (p: { taskId: string; error: string }) => void): Promise<UnlistenFn> {
   return listen<{ taskId: string; error: string }>("sniffer:error", (e) => cb(e.payload));
 }
+
+// ============================================================
+// Chat History Management
+// ============================================================
+
+/** Search chat history by keyword and date range. */
+export function chatSearch(keyword: string, dateFrom?: string, dateTo?: string): Promise<StoredMessage[]> {
+  return invoke<StoredMessage[]>("chat_search", { keyword, dateFrom, dateTo });
+}
+
+/** Delete specific chat messages by IDs. */
+export function chatDelete(ids: number[]): Promise<void> {
+  return invoke<void>("chat_delete", { ids });
+}
+
+/** Clear all chat history. */
+export function chatClear(): Promise<void> {
+  return invoke<void>("chat_clear");
+}
+
+// ============================================================
+// Clipboard Batch Operations
+// ============================================================
+
+/** Delete multiple clipboard entries by IDs. */
+export function clipboardDeleteBatch(ids: string[]): Promise<void> {
+  return invoke<void>("clipboard_delete", { ids });
+}
+
+/** Export clipboard entries to a file. */
+export function clipboardExport(ids: string[], format: string): Promise<string> {
+  return invoke<string>("clipboard_export", { ids, format });
+}
+
+/** Set the maximum number of clipboard entries to keep. */
+export function clipboardSetLimit(limit: number): Promise<void> {
+  return invoke<void>("clipboard_set_limit", { limit });
+}

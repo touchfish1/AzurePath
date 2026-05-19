@@ -12,7 +12,18 @@ import {
   Wifi,
   FileUp,
   Wrench,
+  Settings,
+  ChevronsLeft,
+  ChevronsRight,
 } from "lucide-vue-next";
+
+defineProps<{
+  collapsed: boolean;
+}>();
+
+const emit = defineEmits<{
+  "toggle-collapse": [];
+}>();
 
 const route = useRoute();
 
@@ -35,6 +46,7 @@ const navItems: NavItem[] = [
   { label: "网络嗅探", name: "network-sniffer", path: "/network-sniffer", icon: Wifi },
   { label: "文件传输", name: "files", path: "/files", icon: FileUp },
   { label: "工具箱", name: "toolbox", path: "/toolbox", icon: Wrench },
+  { label: "设置", name: "settings", path: "/settings", icon: Settings },
 ];
 
 function isActive(path: string): boolean {
@@ -45,11 +57,15 @@ function isActive(path: string): boolean {
 
 <template>
   <aside
-    class="flex w-56 shrink-0 flex-col border-r border-paper-deep bg-paper-warm/50"
+    class="flex shrink-0 flex-col border-r border-paper-deep bg-paper-warm/50 transition-all duration-200"
+    :class="collapsed ? 'w-16' : 'w-56'"
   >
     <!-- Logo area -->
-    <div class="flex h-12 items-center px-5 border-b border-paper-deep/50">
-      <span class="text-sm font-display font-bold text-ink">导航</span>
+    <div
+      class="flex h-12 items-center border-b border-paper-deep/50 transition-all duration-200"
+      :class="collapsed ? 'justify-center px-0' : 'px-5'"
+    >
+      <span v-if="!collapsed" class="text-sm font-display font-bold text-ink">导航</span>
     </div>
 
     <!-- Navigation -->
@@ -58,25 +74,37 @@ function isActive(path: string): boolean {
         v-for="item in navItems"
         :key="item.name"
         :to="item.path"
-        class="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors"
-        :class="
+        class="flex items-center rounded-lg px-3 py-2 text-sm font-medium transition-colors"
+        :class="[
+          collapsed ? 'justify-center' : 'gap-3',
           isActive(item.path)
             ? 'bg-bamboo/10 text-bamboo'
             : 'text-ink-soft hover:bg-paper-deep/50 hover:text-ink'
-        "
+        ]"
         :aria-current="isActive(item.path) ? 'page' : undefined"
+        :title="collapsed ? item.label : undefined"
       >
         <component
           :is="item.icon"
           class="h-4 w-4 shrink-0"
         />
-        <span>{{ item.label }}</span>
+        <span v-if="!collapsed">{{ item.label }}</span>
       </router-link>
     </nav>
 
-    <!-- Footer -->
-    <div class="border-t border-paper-deep/50 px-5 py-3">
-      <span class="text-xs text-ink-faint">AzurePath v0.1.0</span>
+    <!-- Collapse toggle -->
+    <div class="border-t border-paper-deep/50 px-2 py-2">
+      <button
+        class="flex w-full items-center justify-center rounded-lg px-3 py-2 text-sm text-ink-soft transition-colors hover:bg-paper-deep/50 hover:text-ink"
+        @click="emit('toggle-collapse')"
+        :title="collapsed ? '展开侧栏' : '折叠侧栏'"
+      >
+        <component
+          :is="collapsed ? ChevronsRight : ChevronsLeft"
+          class="h-4 w-4"
+        />
+        <span v-if="!collapsed" class="ml-3">折叠</span>
+      </button>
     </div>
   </aside>
 </template>

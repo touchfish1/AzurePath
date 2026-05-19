@@ -2,7 +2,7 @@ mod store;
 
 use crate::core::connection::{ConnectionManager, IncomingFrame};
 use crate::types::chat::{Frame, StoredMessage};
-use store::ChatStore;
+pub use store::ChatStore;
 use uuid::Uuid;
 
 /// High-level chat operations used by the command layer.

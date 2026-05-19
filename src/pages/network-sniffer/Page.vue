@@ -8,6 +8,9 @@ import {
   Search,
   Download,
   ChevronDown,
+  Copy,
+  ArrowUp,
+  ArrowDown,
 } from "lucide-vue-next";
 import Button from "@/components/ui/button/Button.vue";
 import PortModal from "@/components/network-sniffer/PortModal.vue";
@@ -25,6 +28,52 @@ import {
   type PortPreset,
 } from "@/lib/tauri";
 import type { UnlistenFn } from "@tauri-apps/api/event";
+import { useToastStore } from "@/stores/toast";
+
+const toast = useToastStore();
+
+function copyIp(ip: string) {
+  navigator.clipboard.writeText(ip).then(() => {
+    toast.add("success", "已复制");
+  });
+}
+
+// Sorting state
+const deviceSortKey = ref<string | null>(null);
+const deviceSortDir = ref<"asc" | "desc" | null>(null);
+
+function toggleDeviceSort(key: string) {
+  if (deviceSortKey.value === key) {
+    if (deviceSortDir.value === "asc") {
+      deviceSortDir.value = "desc";
+    } else if (deviceSortDir.value === "desc") {
+      deviceSortKey.value = null;
+      deviceSortDir.value = null;
+    }
+  } else {
+    deviceSortKey.value = key;
+    deviceSortDir.value = "asc";
+  }
+}
+
+const sortedDevices = computed(() => {
+  const items = [...filteredDevices.value];
+  if (!deviceSortKey.value || !deviceSortDir.value) return items;
+  return items.sort((a: any, b: any) => {
+    let valA: any, valB: any;
+    if (deviceSortKey.value === "ports") {
+      valA = a.openPorts.length;
+      valB = b.openPorts.length;
+    } else {
+      valA = a[deviceSortKey.value as keyof typeof a];
+      valB = b[deviceSortKey.value as keyof typeof b];
+    }
+    if (valA == null) return 1;
+    if (valB == null) return -1;
+    const cmp = typeof valA === "number" ? valA - valB : String(valA).localeCompare(String(valB));
+    return deviceSortDir.value === "asc" ? cmp : -cmp;
+  });
+});
 
 const targets = ref("192.168.1.0/24");
 const scanMode = ref<"fast" | "deep">("fast");
@@ -400,6 +449,36 @@ onUnmounted(cleanup);
         <div class="flex flex-wrap items-center justify-between gap-2 border-b border-paper-deep/50 px-5 py-3">
           <h2 class="text-sm font-semibold text-ink">扫描结果</h2>
           <div class="flex items-center gap-2">
+            <div class="flex items-center gap-1 text-xs text-ink-faint">
+              <span class="mr-1">排序:</span>
+              <button
+                class="rounded px-1.5 py-0.5 transition-colors hover:bg-paper-deep/50"
+                :class="deviceSortKey === 'ip' ? 'bg-bamboo/10 text-bamboo' : ''"
+                @click="toggleDeviceSort('ip')"
+              >
+                IP
+                <ArrowUp v-if="deviceSortKey === 'ip' && deviceSortDir === 'asc'" class="inline h-2.5 w-2.5" />
+                <ArrowDown v-else-if="deviceSortKey === 'ip' && deviceSortDir === 'desc'" class="inline h-2.5 w-2.5" />
+              </button>
+              <button
+                class="rounded px-1.5 py-0.5 transition-colors hover:bg-paper-deep/50"
+                :class="deviceSortKey === 'ports' ? 'bg-bamboo/10 text-bamboo' : ''"
+                @click="toggleDeviceSort('ports')"
+              >
+                端口
+                <ArrowUp v-if="deviceSortKey === 'ports' && deviceSortDir === 'asc'" class="inline h-2.5 w-2.5" />
+                <ArrowDown v-else-if="deviceSortKey === 'ports' && deviceSortDir === 'desc'" class="inline h-2.5 w-2.5" />
+              </button>
+              <button
+                class="rounded px-1.5 py-0.5 transition-colors hover:bg-paper-deep/50"
+                :class="deviceSortKey === 'os' ? 'bg-bamboo/10 text-bamboo' : ''"
+                @click="toggleDeviceSort('os')"
+              >
+                OS
+                <ArrowUp v-if="deviceSortKey === 'os' && deviceSortDir === 'asc'" class="inline h-2.5 w-2.5" />
+                <ArrowDown v-else-if="deviceSortKey === 'os' && deviceSortDir === 'desc'" class="inline h-2.5 w-2.5" />
+              </button>
+            </div>
             <select
               v-model="filterService"
               class="rounded-lg border border-paper-deep bg-paper-warm/50 px-2.5 py-1 text-xs text-ink outline-none"
@@ -427,7 +506,7 @@ onUnmounted(cleanup);
         <!-- Device list -->
         <div class="p-4 space-y-3">
           <div
-            v-for="device in filteredDevices"
+            v-for="device in sortedDevices"
             :key="device.ip"
             class="rounded-xl border border-paper-deep/20 bg-paper-warm/30"
           >
@@ -455,10 +534,17 @@ onUnmounted(cleanup);
               >
                 {{ device.scanMode }}
               </span>
-              <span v-if="device.os" class="ml-auto text-xs text-ink-soft">{{ device.os }}</span>
+              <span v-if="device.os" class="text-xs text-ink-soft">{{ device.os }}</span>
               <span class="text-xs text-ink-faint">
                 {{ device.openPorts.length }} 端口
               </span>
+              <button
+                class="rounded-lg p-1.5 text-ink-faint transition-colors hover:text-bamboo hover:bg-bamboo/5"
+                title="复制 IP"
+                @click.stop="copyIp(device.ip)"
+              >
+                <Copy class="h-3.5 w-3.5" />
+              </button>
             </div>
 
             <!-- Port table -->

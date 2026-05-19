@@ -1,10 +1,55 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted } from "vue";
-import { Play, Square, Scan } from "lucide-vue-next";
+import { onMounted, onUnmounted, ref, computed } from "vue";
+import { Play, Square, Scan, Copy, ArrowUp, ArrowDown } from "lucide-vue-next";
 import Button from "@/components/ui/button/Button.vue";
 import { usePortScanStore } from "@/stores/portScan";
+import { useToastStore } from "@/stores/toast";
+
+const toast = useToastStore();
+
+function copyPort(port: number) {
+  navigator.clipboard.writeText(String(port)).then(() => {
+    toast.add("success", "已复制");
+  });
+}
 
 const store = usePortScanStore();
+
+// Sorting state
+const sortKey = ref<string | null>(null);
+const sortDir = ref<"asc" | "desc" | null>(null);
+
+function toggleSort(key: string) {
+  if (sortKey.value === key) {
+    if (sortDir.value === "asc") {
+      sortDir.value = "desc";
+    } else if (sortDir.value === "desc") {
+      sortKey.value = null;
+      sortDir.value = null;
+    }
+  } else {
+    sortKey.value = key;
+    sortDir.value = "asc";
+  }
+}
+
+const sortedPorts = computed(() => {
+  const items = [...store.foundPorts];
+  if (!sortKey.value || !sortDir.value) return items;
+  return items.sort((a: any, b: any) => {
+    const valA = a[sortKey.value as keyof typeof a];
+    const valB = b[sortKey.value as keyof typeof b];
+    if (valA == null) return 1;
+    if (valB == null) return -1;
+    const cmp = typeof valA === "number" ? valA - valB : String(valA).localeCompare(String(valB));
+    return sortDir.value === "asc" ? cmp : -cmp;
+  });
+});
+
+function sortIndicator(key: string): string {
+  if (sortKey.value !== key) return "";
+  return sortDir.value === "asc" ? "asc" : "desc";
+}
 
 onMounted(async () => {
   if (store.currentTaskId) {
@@ -122,19 +167,47 @@ onUnmounted(() => {
         <table class="w-full text-sm">
           <thead>
             <tr class="border-b border-paper-deep/30 text-xs text-ink-faint uppercase tracking-wider">
-              <th class="px-5 py-3 text-left font-medium">端口</th>
-              <th class="px-5 py-3 text-left font-medium">服务</th>
+              <th
+                class="px-5 py-3 text-left font-medium cursor-pointer select-none hover:text-ink"
+                @click="toggleSort('port')"
+              >
+                <span class="inline-flex items-center gap-1">
+                  端口
+                  <ArrowUp v-if="sortIndicator('port') === 'asc'" class="h-3 w-3" />
+                  <ArrowDown v-else-if="sortIndicator('port') === 'desc'" class="h-3 w-3" />
+                </span>
+              </th>
+              <th
+                class="px-5 py-3 text-left font-medium cursor-pointer select-none hover:text-ink"
+                @click="toggleSort('service')"
+              >
+                <span class="inline-flex items-center gap-1">
+                  服务
+                  <ArrowUp v-if="sortIndicator('service') === 'asc'" class="h-3 w-3" />
+                  <ArrowDown v-else-if="sortIndicator('service') === 'desc'" class="h-3 w-3" />
+                </span>
+              </th>
+              <th class="px-5 py-3 text-left font-medium w-14">操作</th>
             </tr>
           </thead>
           <tbody>
             <tr
-              v-for="fp in store.foundPorts"
+              v-for="fp in sortedPorts"
               :key="fp.port"
               class="border-b border-paper-deep/20 last:border-0 animate-slide-up"
             >
               <td class="px-5 py-2.5 font-mono text-ink">{{ fp.port }}</td>
               <td class="px-5 py-2.5 text-ink-soft">
                 {{ fp.service || "未知" }}
+              </td>
+              <td class="px-5 py-2.5">
+                <button
+                  class="rounded-lg p-1.5 text-ink-faint transition-colors hover:text-bamboo hover:bg-bamboo/5"
+                  title="复制端口"
+                  @click="copyPort(fp.port)"
+                >
+                  <Copy class="h-3.5 w-3.5" />
+                </button>
               </td>
             </tr>
           </tbody>

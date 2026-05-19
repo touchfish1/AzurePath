@@ -1,8 +1,17 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted } from "vue";
-import { Play, Square, Radio } from "lucide-vue-next";
+import { Play, Square, Radio, Copy } from "lucide-vue-next";
 import Button from "@/components/ui/button/Button.vue";
 import { usePingStore } from "@/stores/ping";
+import { useToastStore } from "@/stores/toast";
+
+const toast = useToastStore();
+
+function copyIp(target: string) {
+  navigator.clipboard.writeText(target).then(() => {
+    toast.add("success", "已复制");
+  });
+}
 
 const store = usePingStore();
 
@@ -102,6 +111,7 @@ onUnmounted(() => {
               <th class="px-5 py-3 text-left font-medium">TTL</th>
               <th class="px-5 py-3 text-right font-medium">延迟</th>
               <th class="px-5 py-3 text-left font-medium">状态</th>
+              <th class="px-5 py-3 text-left font-medium w-14">操作</th>
             </tr>
           </thead>
           <tbody>
@@ -142,6 +152,15 @@ onUnmounted(() => {
                 >
                   {{ r.status === "success" ? "成功" : r.status }}
                 </span>
+              </td>
+              <td class="px-5 py-2.5">
+                <button
+                  class="rounded-lg p-1.5 text-ink-faint transition-colors hover:text-bamboo hover:bg-bamboo/5"
+                  title="复制目标 IP"
+                  @click="copyIp(store.target)"
+                >
+                  <Copy class="h-3.5 w-3.5" />
+                </button>
               </td>
             </tr>
           </tbody>
