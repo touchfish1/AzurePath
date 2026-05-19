@@ -14,6 +14,7 @@ export const useBookmarkStore = defineStore("bookmark", () => {
   const loading = ref(false);
 
   async function loadBookmarks() {
+    if (loaded.value) return;
     loading.value = true;
     try {
       bookmarks.value = await listBookmarks();

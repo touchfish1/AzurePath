@@ -45,7 +45,7 @@ async function handleAdd() {
   newLabel.value = "";
 }
 
-async function handleDelete(id: string, event: MouseEvent) {
+async function handleDelete(id: string, event: Event) {
   event.stopPropagation();
   await store.remove(id);
 }
@@ -114,13 +114,16 @@ function onBackdropClick(event: MouseEvent) {
               <div class="truncate text-ink font-medium">{{ bm.label }}</div>
               <div class="truncate text-xs text-ink-faint font-mono">{{ bm.target }}</div>
             </div>
-            <button
-              class="shrink-0 rounded p-1 text-ink-faint hover:text-red-500 hover:bg-red-500/5 transition-colors"
+            <span
+              class="shrink-0 rounded p-1 text-ink-faint hover:text-red-500 hover:bg-red-500/5 transition-colors cursor-pointer"
+              role="button"
+              tabindex="0"
               title="删除"
               @click="handleDelete(bm.id, $event)"
+              @keydown.enter="handleDelete(bm.id, $event)"
             >
               <span class="text-xs">&times;</span>
-            </button>
+            </span>
           </button>
         </div>
       </div>

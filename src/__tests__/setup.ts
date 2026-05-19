@@ -12,3 +12,6 @@ Object.defineProperty(window, "matchMedia", {
     dispatchEvent: vi.fn(),
   })),
 });
+
+// Polyfill scrollIntoView for jsdom (not implemented)
+Element.prototype.scrollIntoView = vi.fn();

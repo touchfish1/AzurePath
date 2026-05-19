@@ -100,9 +100,9 @@ export const useThemeStore = defineStore("theme", () => {
     if (isNight && resolved.value !== "dark") {
       applyTheme("dark");
     } else if (!isNight && resolved.value === "dark" && nightModeEnabled.value) {
-      // Revert to preference
+      // Revert to stored preference (or system default)
       const stored = getStoredPreference();
-      if (stored && stored !== "dark") {
+      if (stored) {
         applyTheme(stored);
       } else {
         applyTheme("system");
@@ -162,10 +162,11 @@ export const useThemeStore = defineStore("theme", () => {
     // Restore persisted theme preference
     const stored = getStoredPreference();
     if (stored) {
-      theme.value = stored;
+      theme.value = stored; // triggers watch -> applyTheme + persistTheme
+    } else {
+      applyTheme(theme.value); // first-time apply with default
     }
 
-    applyTheme(theme.value);
     setupMediaListener();
 
     // Restore night mode settings
