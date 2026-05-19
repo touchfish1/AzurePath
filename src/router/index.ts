@@ -93,6 +93,11 @@ const routes: RouteRecordRaw[] = [
     component: () => import("@/pages/api-test/Page.vue"),
   },
   {
+    path: "/bookmarks",
+    name: "bookmarks",
+    component: () => import("@/pages/bookmarks/Page.vue"),
+  },
+  {
     path: "/target-groups",
     name: "target-groups",
     component: () => import("@/pages/target-groups/Page.vue"),

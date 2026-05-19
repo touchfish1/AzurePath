@@ -9,6 +9,7 @@ import UpdateBanner from "@/components/UpdateBanner.vue";
 import Toast from "@/components/Toast.vue";
 import SetupWizard from "@/components/SetupWizard.vue";
 import ErrorBoundary from "@/components/ErrorBoundary.vue";
+import CommandPalette from "@/components/CommandPalette.vue";
 
 const themeStore = useThemeStore();
 const settingsStore = useSettingsStore();
@@ -75,5 +76,8 @@ function onWizardCompleted() {
 
     <!-- Toast notifications -->
     <Toast />
+
+    <!-- Command palette (Ctrl+K) -->
+    <CommandPalette />
   </div>
 </template>

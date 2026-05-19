@@ -12,6 +12,7 @@ function copyValue(value: string) {
   });
 }
 import Button from "@/components/ui/button/Button.vue";
+import BookmarkButton from "@/components/BookmarkButton.vue";
 import {
   dnsLookup,
   onDnsResult,
@@ -109,13 +110,16 @@ onUnmounted(() => {
       <div class="flex flex-wrap items-end gap-3">
         <div class="flex-1 min-w-[180px]">
           <label class="mb-1 block text-xs font-medium text-ink-soft">域名</label>
-          <input
-            v-model="target"
-            placeholder="example.com"
-            :disabled="loading"
-            class="w-full rounded-lg border border-paper-deep bg-paper-warm/50 px-3 py-2 text-sm text-ink placeholder:text-ink-faint/50 outline-none transition-colors focus:border-bamboo/50 focus:ring-1 focus:ring-bamboo/20 disabled:opacity-50"
-            @keyup.enter="lookup"
-          />
+          <div class="flex items-center gap-1">
+            <input
+              v-model="target"
+              placeholder="example.com"
+              :disabled="loading"
+              class="flex-1 rounded-lg border border-paper-deep bg-paper-warm/50 px-3 py-2 text-sm text-ink placeholder:text-ink-faint/50 outline-none transition-colors focus:border-bamboo/50 focus:ring-1 focus:ring-bamboo/20 disabled:opacity-50"
+              @keyup.enter="lookup"
+            />
+            <BookmarkButton :target="target" @select="(t: string) => { target = t; }" />
+          </div>
         </div>
         <div class="w-40">
           <label class="mb-1 block text-xs font-medium text-ink-soft">DNS 服务器</label>

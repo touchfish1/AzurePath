@@ -2,6 +2,7 @@
 import { onMounted, onUnmounted, watch, ref, nextTick } from "vue";
 import { Play, Square, Route, Copy } from "lucide-vue-next";
 import Button from "@/components/ui/button/Button.vue";
+import BookmarkButton from "@/components/BookmarkButton.vue";
 import { useTracerouteStore } from "@/stores/traceroute";
 import { useToastStore } from "@/stores/toast";
 import { useTargetGroupStore } from "@/stores/targetGroup";
@@ -143,12 +144,15 @@ onUnmounted(() => {
       <div class="flex flex-wrap items-end gap-3">
         <div class="flex-1 min-w-[180px]">
           <label class="mb-1 block text-xs font-medium text-ink-soft">目标地址</label>
-          <input
-            v-model="store.target"
-            placeholder="IP 地址或域名"
-            :disabled="store.running || batchRunning"
-            class="w-full rounded-lg border border-paper-deep bg-paper-warm/50 px-3 py-2 text-sm text-ink placeholder:text-ink-faint/50 outline-none transition-colors focus:border-bamboo/50 focus:ring-1 focus:ring-bamboo/20 disabled:opacity-50"
-          />
+          <div class="flex items-center gap-1">
+            <input
+              v-model="store.target"
+              placeholder="IP 地址或域名"
+              :disabled="store.running || batchRunning"
+              class="flex-1 rounded-lg border border-paper-deep bg-paper-warm/50 px-3 py-2 text-sm text-ink placeholder:text-ink-faint/50 outline-none transition-colors focus:border-bamboo/50 focus:ring-1 focus:ring-bamboo/20 disabled:opacity-50"
+            />
+            <BookmarkButton :target="store.target" @select="store.target = $event" />
+          </div>
         </div>
         <div class="w-24">
           <label class="mb-1 block text-xs font-medium text-ink-soft">最大跳数</label>

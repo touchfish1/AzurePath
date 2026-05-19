@@ -1,4 +1,5 @@
 pub mod bandwidth;
+pub mod bookmark;
 pub mod chat;
 pub mod clipboard;
 pub mod connection;

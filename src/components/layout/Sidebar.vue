@@ -6,6 +6,7 @@ import {
   Route,
   Scan,
   Globe,
+  Bookmark,
   History,
   MessageSquare,
   Clipboard,
@@ -49,6 +50,7 @@ const navItems: NavItem[] = [
   { label: "Traceroute", name: "traceroute", path: "/traceroute", icon: Route },
   { label: "端口扫描", name: "port-scan", path: "/port-scan", icon: Scan },
   { label: "DNS 查询", name: "dns", path: "/dns", icon: Globe },
+  { label: "书签", name: "bookmarks", path: "/bookmarks", icon: Bookmark },
   { label: "目标分组", name: "target-groups", path: "/target-groups", icon: Layers },
   { label: "历史记录", name: "history", path: "/history", icon: History },
   { label: "消息", name: "chat", path: "/chat", icon: MessageSquare },
@@ -124,6 +126,10 @@ function isActive(path: string): boolean {
         />
         <span v-if="!collapsed" class="ml-3">折叠</span>
       </button>
+      <!-- Ctrl+K command palette hint -->
+      <div v-if="!collapsed" class="mt-1.5 text-center">
+        <kbd class="inline-flex items-center rounded border border-paper-deep/20 bg-paper-warm/30 px-1.5 py-0.5 text-[10px] text-ink-faint/50">Ctrl+K</kbd>
+      </div>
     </div>
   </aside>
 </template>

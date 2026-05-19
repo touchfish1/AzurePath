@@ -209,6 +209,10 @@ pub fn run() {
             commands::target_group::get_target_group,
             commands::target_group::save_target_group,
             commands::target_group::delete_target_group,
+            // Bookmarks
+            commands::bookmark::list_bookmarks,
+            commands::bookmark::add_bookmark,
+            commands::bookmark::delete_bookmark,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

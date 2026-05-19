@@ -2,6 +2,7 @@
 import { onMounted, watch, ref } from "vue";
 import { Sun, Moon, Monitor, Save, Power } from "lucide-vue-next";
 import Button from "@/components/ui/button/Button.vue";
+import NightModeSettings from "@/components/NightModeSettings.vue";
 import { useSettingsStore } from "@/stores/settings";
 import { useToastStore } from "@/stores/toast";
 import { useThemeStore } from "@/stores/theme";
@@ -130,6 +131,9 @@ const maxItemsOptions = [
         </button>
       </div>
     </div>
+
+    <!-- Night Mode Schedule -->
+    <NightModeSettings />
 
     <!-- Autostart -->
     <div class="noise-bg rounded-xl border border-paper-deep/60 bg-paper p-5 shadow-sm">

@@ -996,6 +996,30 @@ export function deleteApiRequest(id: string): Promise<void> {
 }
 
 // ============================================================
+// Bookmarks / Favorites
+// ============================================================
+
+export interface Bookmark {
+  id: string;
+  label: string;
+  target: string;
+  tags: string[];
+  createdAt: string;
+}
+
+export function listBookmarks(): Promise<Bookmark[]> {
+  return invoke("list_bookmarks");
+}
+
+export function addBookmark(label: string, target: string, tags?: string[]): Promise<Bookmark> {
+  return invoke("add_bookmark", { label, target, tags: tags || [] });
+}
+
+export function deleteBookmark(id: string): Promise<void> {
+  return invoke("delete_bookmark", { id });
+}
+
+// ============================================================
 // Target Group Management
 // ============================================================
 

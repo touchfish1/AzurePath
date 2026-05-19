@@ -1,6 +1,7 @@
 pub mod api_test;
 pub mod backup;
 pub mod bandwidth;
+pub mod bookmark;
 pub mod chat;
 pub mod clipboard;
 pub mod discovery;
