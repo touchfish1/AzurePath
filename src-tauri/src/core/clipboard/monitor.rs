@@ -65,7 +65,7 @@ impl ClipboardMonitor {
         let app_lock = self.app.clone();
 
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(1500));
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(500));
             // Skip the first immediate tick so the first poll happens after 1.5s
             interval.tick().await;
 
