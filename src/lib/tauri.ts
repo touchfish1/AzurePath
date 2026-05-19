@@ -522,13 +522,13 @@ export function onSnifferDevice(cb: (d: DeviceResult) => void): Promise<Unlisten
 }
 
 export function onSnifferPort(cb: (p: PortResult & { ip: string }) => void): Promise<UnlistenFn> {
-  return listen("sniffer:port", (e) => cb(e.payload as any));
+  return listen<PortResult & { ip: string }>("sniffer:port", (e) => cb(e.payload));
 }
 
 export function onSnifferComplete(cb: (p: { taskId: string }) => void): Promise<UnlistenFn> {
-  return listen("sniffer:complete", (e) => cb(e.payload as any));
+  return listen<{ taskId: string }>("sniffer:complete", (e) => cb(e.payload));
 }
 
 export function onSnifferError(cb: (p: { taskId: string; error: string }) => void): Promise<UnlistenFn> {
-  return listen("sniffer:error", (e) => cb(e.payload as any));
+  return listen<{ taskId: string; error: string }>("sniffer:error", (e) => cb(e.payload));
 }

@@ -16,7 +16,8 @@ pub async fn sniffer_start(
 }
 
 #[tauri::command]
-pub async fn sniffer_stop(task_id: String) -> Result<(), String> {
+pub async fn sniffer_stop(app: tauri::AppHandle, task_id: String) -> Result<(), String> {
+    let _ = app;
     let cancel = {
         let tokens = CANCEL_TOKENS.lock().map_err(|e| e.to_string())?;
         tokens.get(&task_id).cloned()
