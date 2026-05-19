@@ -1,5 +1,6 @@
 use crate::core::clipboard::{ClipboardMonitor, ClipboardStore};
 use crate::types::clipboard::ClipboardEntry;
+use crate::types::clipboard::MAX_CLIPBOARD_BYTES;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use tauri::AppHandle;
@@ -130,6 +131,10 @@ pub(crate) async fn handle_frame(incoming: &crate::core::connection::IncomingFra
             None => return,
         };
         for entry in entries {
+            if entry.content_bytes() > MAX_CLIPBOARD_BYTES {
+                eprintln!("[clipboard] Skipping synced entry exceeding size limit");
+                continue;
+            }
             if let Err(e) = store.insert(entry) {
                 eprintln!("[clipboard] Failed to save synced entry: {}", e);
             }

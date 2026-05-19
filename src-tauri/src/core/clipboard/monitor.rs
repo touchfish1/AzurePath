@@ -1,5 +1,6 @@
 use crate::core::clipboard::ClipboardStore;
 use crate::types::clipboard::ClipboardEntry;
+use crate::types::clipboard::MAX_CLIPBOARD_BYTES;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -142,8 +143,12 @@ impl ClipboardMonitor {
 
         // Try image first (rich content takes priority)
         if let Ok(image) = app.clipboard().read_image() {
-            let mut hasher = std::hash::DefaultHasher::new();
             let rgba = image.rgba().to_vec();
+            // Skip images larger than 20 MB (width × height × 4 bytes)
+            if rgba.len() as u64 > MAX_CLIPBOARD_BYTES {
+                return None;
+            }
+            let mut hasher = std::hash::DefaultHasher::new();
             let width = image.width();
             let height = image.height();
             rgba.hash(&mut hasher);
@@ -170,7 +175,7 @@ impl ClipboardMonitor {
 
         // Try text
         if let Ok(text) = app.clipboard().read_text() {
-            if text.is_empty() {
+            if text.is_empty() || text.len() as u64 > MAX_CLIPBOARD_BYTES {
                 return None;
             }
             let mut hasher = std::hash::DefaultHasher::new();
