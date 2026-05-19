@@ -8,7 +8,6 @@ import {
   Globe,
   History,
   MessageSquare,
-  FileUp,
 } from "lucide-vue-next";
 
 const route = useRoute();
@@ -27,8 +26,7 @@ const navItems: NavItem[] = [
   { label: "端口扫描", name: "port-scan", path: "/port-scan", icon: Scan },
   { label: "DNS 查询", name: "dns", path: "/dns", icon: Globe },
   { label: "历史记录", name: "history", path: "/history", icon: History },
-  { label: "聊天", name: "chat", path: "/chat", icon: MessageSquare },
-  { label: "文件传输", name: "files", path: "/files", icon: FileUp },
+  { label: "消息", name: "chat", path: "/chat", icon: MessageSquare },
 ];
 
 function isActive(path: string): boolean {
