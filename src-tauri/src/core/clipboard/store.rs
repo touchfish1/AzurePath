@@ -40,12 +40,13 @@ impl ClipboardStore {
                 text_content TEXT,
                 image_path   TEXT,
                 file_paths   TEXT,
-                content_hash TEXT NOT NULL,
+                content_hash TEXT NOT NULL UNIQUE,
                 is_favorite  INTEGER DEFAULT 0,
                 created_at   TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_clipboard_created ON clipboard_entries(created_at);
             CREATE INDEX IF NOT EXISTS idx_clipboard_favorite ON clipboard_entries(is_favorite);
+            CREATE INDEX IF NOT EXISTS idx_clipboard_hash ON clipboard_entries(content_hash);
             ",
         )
         .map_err(|e| format!("Failed to init clipboard tables: {}", e))?;
