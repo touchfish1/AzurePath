@@ -517,15 +517,178 @@
 ## 最终执行顺序
 
 ```
-第一波（当前 F1/F2/R agents 正在做）:
+第一波（已完成）:
   Toast/复制/排序/侧栏/设置/聊天历史/剪贴板批量/进度条/WiFiQR
   + Rust: store/WHOIS/HTTP/SSL/MAC/活动日志/导出/设置持久化
 
-第二波（新功能）:
+第二波（已完成）:
   Speedtest → 预设配置 → 首次向导 → 网络拓扑可视化
 
-第三波（质量冲刺，可并行）:
+第三波（已完成）:
   修复 dead code 警告 + 响应式布局 + 统一错误提示 + 二进制优化
+
+第四波（Phase 5，当前 agents 正在做）:
+  SSH 终端 + WOL + 窗口状态/自启动 + 工具箱开发者工具
+  + mDNS 发现 + 带宽监控 + 仪表盘图表 + 性能历史
+  + 报告导出 + 数据导出增强
+```
+
+---
+
+## 十五、Phase 5 — 新功能扩展
+
+> 基于 2026-05-19 调研讨论确认。覆盖系统集成、网络发现增强、SSH 终端、仪表盘增强等方向。
+
+### 第一梯队：高价值低工作量
+
+#### 60. Wake-on-LAN (WOL) 🔜 待实现
+- **用途**: 远程唤醒局域网内设备
+- **Rust**: `tokio::net::UdpSocket` 广播魔术包（6 字节 0xFF + MAC 重复 16 次）到 UDP 端口 9
+- **前端**: 新建 `src/pages/wol/Page.vue` — 输入 MAC 地址 + 目标 IP/广播地址，保存历史记录
+- **联动**: 与设备发现列表集成，已发现的设备直接点 WOL 按钮
+- **文件**: 新建 `src-tauri/src/types/wol.rs`, `src-tauri/src/core/wol/mod.rs`, `src-tauri/src/commands/wol.rs`
+- 路由 `/wol`，侧栏入口
+- 估计: ~1.5h
+
+#### 61. 窗口状态持久化 🔜 待实现
+- **用途**: 记住窗口位置、大小、是否最大化，重启恢复
+- **实现**: 添加 `tauri-plugin-window-state` 到 `Cargo.toml`，在 `lib.rs` 注册 `.plugin(tauri_plugin_window_state::Builder::new().build())`
+- 几乎零代码，纯配置
+- 估计: ~0.3h
+
+#### 62. 自启动 + 单实例 🔜 待实现
+- **用途**: 开机自启 + 防止重复启动
+- **自启动**: `tauri-plugin-autostart` — 设置页添加开关
+- **单实例**: Tauri 2.0 内置 `.single_instance()` — 监听第二次启动事件，唤出已有窗口
+- **前端**: 设置页面增加 "开机自启" 开关，调用 `tauri-plugin-autostart` API
+- 估计: ~0.5h
+
+#### 63. 报告导出 (HTML/PDF) 🔜 待实现
+- **用途**: Ping/端口扫描/嗅探/DNS 结果导出为格式化报告
+- **实现**: 前端纯实现
+  - 通用报告模板渲染函数，输入 `{ title, columns, rows, timestamp }` 输出完整 HTML
+  - HTML 自带内联样式，可直接打印为 PDF（`window.print()`）
+  - 保存通过 Tauri dialog 选路径
+- **页面集成**: Ping/端口扫描/嗅探/DNS 结果工具栏加 "导出报告" 按钮
+- 估计: ~2h
+
+#### 64. mDNS/Bonjour 服务发现 🔜 待实现
+- **用途**: 发现局域网内 HTTP/SMB/SSH/FTP 等服务
+- **Rust**: 发送 UDP 多播到 `224.0.0.251:5353`，解析 mDNS 响应（与 DNS 报文格式兼容）
+  - 查询 `_http._tcp.local`, `_smb._tcp.local`, `_ssh._tcp.local`, `_ftp._tcp.local` 等常见服务
+  - 解析结果：服务类型、主机名、端口、TXT 记录
+- **前端**: 嗅探器页面或独立页面展示发现的服务列表
+- **复用**: DNS 解析模块的报文解析逻辑
+- 估计: ~2.5h
+
+### 第二梯队：核心功能加强
+
+#### 65. SSH 终端 🔜 待实现
+- **用途**: 内嵌 SSH 客户端，多标签会话管理
+- **Rust**: 使用 `russh` 或 `ssh2` crate 建立 SSH 连接
+  - `src-tauri/src/core/ssh/` 模块 — Session 管理，Channel 读写
+  - `src-tauri/src/commands/ssh.rs` — `ssh_connect`, `ssh_exec`, `ssh_resize`, `ssh_disconnect`
+  - 通过 Tauri event `ssh:data` 推送终端输出，接收 `ssh:input` 事件发送输入
+- **前端**: xterm.js + fit-addon
+  - 新建 `src/pages/terminal/Page.vue`
+  - 多标签切换，连接管理侧栏（保存的会话列表）
+  - 支持密码和密钥认证
+- 注意: `russh` 是纯 Rust 实现，无需依赖 OpenSSL；`ssh2` 依赖 libssh2，功能更成熟
+- 路由 `/terminal`，侧栏入口
+- 估计: ~4-6h
+
+#### 66. 实时带宽监控 🔜 待实现
+- **用途**: 实时显示各网卡的上传/下载速率
+- **Rust**: Windows 上读取 `GetIfEntry2` / `GetAdapterAddresses` API（或 `libc::getifaddrs` on Unix）
+  - 1 秒轮询间隔，计算差值得到瞬时速率
+  - 返回 `{ interface: String, download_bps: u64, upload_bps: u64, total_rx: u64, total_tx: u64 }`
+- **前端**: 折线图实时展示（Chart.js 或纯 Canvas）
+  - 可选网卡，显示最近 60 秒趋势
+  - 仪表盘集成小部件或独立页面
+- 文件: 新建 `src-tauri/src/core/bandwidth/mod.rs`, `src-tauri/src/commands/bandwidth.rs`, `src-tauri/src/types/bandwidth.rs`
+- 估计: ~3h
+
+#### 67. 仪表盘图表增强 🔜 待实现
+- **用途**: Ping 延迟历史、端口扫描热力图、流量趋势
+- **Ping 历史图**:
+  - 每次 Ping 完成后将结果存 `localStorage`（保留最近 100 次）
+  - 仪表盘展示延迟折线图，Y 轴延迟 ms，X 轴时间点
+  - 不同目标用不同颜色系列
+- **端口扫描热力图**:
+  - X 轴端口号，Y 轴目标 IP，颜色表示状态（绿=开放，灰=关闭，红=过滤）
+  - 复用 Tailwind 颜色
+- **实现**: 纯前端，使用简单的 Canvas 或 SVG（避免新增依赖）
+- 估计: ~2.5h
+
+#### 68. 工具箱新增开发者工具 🔜 待实现
+- **用途**: JSON 格式化/JWT 解码/时间戳转换
+- 工具箱新增 tab："开发者工具"
+- **JSON 格式化**: textarea 输入 → 格式化/压缩切换，语法校验报错
+- **JWT 解码**: 输入 JWT token → 解码 Header + Payload（Base64），展示 JSON 结构
+- **时间戳转换**: Unix 秒/毫秒 ↔ 可读日期，时区选择
+- 全部纯前端实现
+- 估计: ~1.5h
+
+#### 69. 数据导出增强 🔜 待实现
+- **用途**: 现有导出基础上增加 CSV 和 HTML 报告格式
+- **新增格式**:
+  - CSV: 通用表格导出，可用 Excel 打开
+  - HTML: 带样式的报告，可直接打印为 PDF
+- **涉及页面**: 聊天历史、剪贴板、活动历史
+- **实现**: 前端格式化函数，Tauri dialog 保存文件
+- 估计: ~1h
+
+### 第三梯队：旗舰功能
+
+#### 70. 网络性能历史（Smokeping 风格）🔜 待实现
+- **用途**: 定时 Ping 目标列表，持久化历史，趋势可视化
+- **Rust**: 后台定时任务（tokio interval）
+  - 从配置读取目标列表，每 5/30/60 分钟 Ping 一次
+  - 结果写入 SQLite（`ping_history` 表）：`{ target, timestamp, latency_ms, loss_rate }`
+  - 命令: `start_monitoring`, `stop_monitoring`, `get_history(target, range)`
+- **前端**: 仪表盘展示延迟趋势图（日/周/月视图）
+  - 类 Smokeping 风格：最近 24 小时延迟折线图 + 丢包率标注
+  - 目标管理：添加/删除监控目标
+- 依赖活动日志持久化基础设施
+- 估计: ~4h
+
+#### 71. VNC 远程桌面 🔜 待实现
+- **用途**: 内嵌 VNC 客户端查看远程桌面
+- **Rust**: `rfb` 协议实现（或使用已有 crate）
+  - TCP 连接 VNC 服务器（默认 5900 端口）
+  - RFB 握手 → 认证 → FramebufferUpdate 接收
+  - 处理编码：Raw、Hextile、TRLE
+  - 转发鼠标/键盘事件到服务器
+- **前端**: Canvas 渲染帧缓冲
+  - 缩放、全屏
+  - 连接管理（保存的 VNC 服务器列表）
+- **工作量大**: 建议先实现基本可用的 Raw 编码 + 简单认证
+- 估计: ~8h+
+
+#### 72. 批量命令执行 🔜 待实现
+- **用途**: 对多台远程设备并发执行命令
+- **Rust**: 复用 SSH 终端基础设施
+  - 从设备列表或手动输入多个目标
+  - 并发 SSH 连接，执行命令，聚合输出
+  - 返回 `{ host, exit_code, stdout, stderr }`
+- **前端**: 多选设备 + 命令输入 + 结果对比表格
+  - 绿色/红色标记成功/失败
+- **依赖**: SSH 终端功能完成后实现
+- 估计: ~3h
+
+---
+
+## Phase 5 执行顺序
+
+```
+第一波（4 个 agent 并发，可独立部署）:
+  Agent A: WOL + 窗口状态 + 自启动/单实例 + 工具箱开发者工具（1.5+0.3+0.5+1.5 ≈ 4h）
+  Agent B: mDNS/Bonjour + 实时带宽监控 + 报告导出（2.5+3+2 ≈ 7.5h）
+  Agent C: SSH 终端（4-6h）
+  Agent D: 仪表盘图表 + 数据导出增强 + 网络性能历史（2.5+1+4 ≈ 7.5h）
+
+第二波（依赖 SSH 基础设施）:
+  批量命令执行 + VNC 远程桌面（依赖 SSH/RFB 模块）
 ```
 
 ## 状态标记说明
