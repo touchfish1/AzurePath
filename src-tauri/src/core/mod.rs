@@ -6,5 +6,6 @@ pub mod dns;
 pub mod file_server;
 pub mod file_transfer;
 pub mod ping;
+pub mod network_sniffer;
 pub mod port_scan;
 pub mod traceroute;

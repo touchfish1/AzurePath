@@ -443,3 +443,92 @@ export function clipboardGetInterval(): Promise<number> {
 export function clipboardSetInterval(ms: number): Promise<void> {
   return invoke<void>("clipboard_set_interval", { ms });
 }
+
+// ============================================================
+// Network Sniffer
+// ============================================================
+
+export interface SnifferOptions {
+  targets: string[];
+  ports: number[];
+  mode: string;
+  concurrencyHosts: number;
+  concurrencyPorts: number;
+  timeoutMs: number;
+  probeServices: boolean;
+}
+
+export interface PortResult {
+  port: number;
+  protocol: string;
+  state: string;
+  service: string | null;
+  version: string | null;
+  banner: string | null;
+  confidence: number;
+  probeMethod: string;
+}
+
+export interface DeviceResult {
+  ip: string;
+  hostname: string | null;
+  mac: string | null;
+  os: string | null;
+  openPorts: PortResult[];
+  isAlive: boolean;
+  scanMode: string;
+  scanCompleted: boolean;
+}
+
+export interface SnifferProgress {
+  totalHosts: number;
+  scannedHosts: number;
+  servicesFound: number;
+  currentTarget: string;
+}
+
+export interface PortPreset {
+  name: string;
+  label: string;
+  ports: number[];
+}
+
+export function snifferStart(options: SnifferOptions): Promise<string> {
+  return invoke<string>("sniffer_start", { options });
+}
+
+export function snifferStop(taskId: string): Promise<void> {
+  return invoke<void>("sniffer_stop", { taskId });
+}
+
+export function snifferList(): Promise<DeviceResult[]> {
+  return invoke<DeviceResult[]>("sniffer_list");
+}
+
+export function snifferExport(taskId: string, format: string): Promise<string> {
+  return invoke<string>("sniffer_export", { taskId, format });
+}
+
+export function snifferPresets(): Promise<PortPreset[]> {
+  return invoke<PortPreset[]>("sniffer_presets");
+}
+
+export function onSnifferProgress(cb: (p: SnifferProgress) => void): Promise<UnlistenFn> {
+  return listen<SnifferProgress>("sniffer:progress", (e) => cb(e.payload));
+}
+
+export function onSnifferDevice(cb: (d: DeviceResult) => void): Promise<UnlistenFn> {
+  return listen<DeviceResult>("sniffer:device", (e) => cb(e.payload));
+}
+
+export function onSnifferPort(cb: (p: PortResult & { ip: string }) => void): Promise<UnlistenFn> {
+  return listen("sniffer:port", (e) => cb(e.payload as any));
+}
+
+export function onSnifferComplete(cb: (p: { taskId: string }) => void): Promise<UnlistenFn> {
+  return listen("sniffer:complete", (e) => cb(e.payload as any));
+}
+
+export function onSnifferError(cb: (p: { taskId: string; error: string }) => void): Promise<UnlistenFn> {
+  return listen("sniffer:error", (e) => cb(e.payload as any));
+}

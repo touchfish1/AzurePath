@@ -42,6 +42,12 @@ pub fn run() {
             commands::clipboard::clipboard_clear,
             commands::clipboard::clipboard_get_interval,
             commands::clipboard::clipboard_set_interval,
+            // Phase 4 — Network Sniffer
+            commands::network_sniffer::sniffer_start,
+            commands::network_sniffer::sniffer_stop,
+            commands::network_sniffer::sniffer_list,
+            commands::network_sniffer::sniffer_export,
+            commands::network_sniffer::sniffer_presets,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
