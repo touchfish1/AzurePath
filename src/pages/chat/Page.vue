@@ -229,29 +229,37 @@ async function sendFileMessage() {
   if (!path || sendingFile.value) return;
 
   sendingFile.value = true;
+  const filename = path.split("/").pop() || path.split("\\").pop() || "unknown";
+  const targetPeer = selectedPeerId.value === "*" ? "*" : selectedPeerId.value;
+
+  // Show immediate visual feedback in the message area
+  const pendingTransfer: FileTransfer = {
+    id: "pending-" + Date.now(),
+    filename,
+    path,
+    size: 0,
+    received: 0,
+    status: selectedPeerId.value === "*" ? "broadcasting" : "pending",
+    peer_id: targetPeer,
+    is_incoming: false,
+    created_at: new Date().toISOString(),
+  };
+  transfers.value.unshift(pendingTransfer);
+
   try {
     if (selectedPeerId.value === "*") {
-      // Broadcast to all connected peers
       await fileBroadcast(path);
+      pendingTransfer.status = "broadcasting";
     } else {
       const fileId = await fileSend(selectedPeerId.value, path);
-      const filename = path.split("/").pop() || path.split("\\").pop() || "unknown";
-      transfers.value.unshift({
-        id: fileId,
-        filename,
-        path: path,
-        size: 0,
-        received: 0,
-        status: "transferring",
-        peer_id: selectedPeerId.value,
-        is_incoming: false,
-        created_at: new Date().toISOString(),
-      });
+      pendingTransfer.id = fileId;
+      pendingTransfer.status = "transferring";
     }
     filePath.value = "";
     showFileInput.value = false;
   } catch (e) {
     console.error("Failed to send file:", e);
+    pendingTransfer.status = "error";
   } finally {
     sendingFile.value = false;
   }
@@ -260,7 +268,7 @@ async function sendFileMessage() {
 async function handleAccept() {
   if (!incomingRequest.value) return;
   try {
-    await fileAccept(incomingRequest.value.fileId, 0);
+    await fileAccept(incomingRequest.value.fileId);
   } catch (e) {
     console.error("Accept error:", e);
   }
@@ -299,6 +307,7 @@ function progressPercent(t: FileTransfer): number {
 function statusClass(status: string): string {
   if (status === "completed") return "bg-bamboo/10 text-bamboo";
   if (status === "transferring") return "bg-blue-100 text-blue-600";
+  if (status === "broadcasting") return "bg-purple-100 text-purple-600";
   if (status.includes("error")) return "bg-red-100 text-red-600";
   return "bg-yellow-100 text-yellow-600";
 }
@@ -434,7 +443,7 @@ function statusClass(status: string): string {
                   class="inline-block rounded-full px-2 py-0.5 text-xs font-medium"
                   :class="statusClass(t.status)"
                 >
-                  {{ t.status === 'completed' ? '已完成' : t.status === 'transferring' ? '传输中' : t.status.includes('error') ? '失败' : '等待中' }}
+                  {{ t.status === 'completed' ? '已完成' : t.status === 'transferring' ? '传输中' : t.status === 'broadcasting' ? '广播中' : t.status.includes('error') ? '失败' : '等待接收' }}
                 </span>
                 <span class="text-xs text-ink-faint">
                   {{ formatSize(t.received) }} / {{ formatSize(t.size) }}

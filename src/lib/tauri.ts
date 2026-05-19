@@ -331,8 +331,8 @@ export function fileBroadcast(path: string): Promise<string> {
 }
 
 /** Accept an incoming file transfer. */
-export function fileAccept(fileId: string, receiverPort: number): Promise<void> {
-  return invoke<void>("file_accept", { fileId, receiverPort });
+export function fileAccept(fileId: string): Promise<void> {
+  return invoke<void>("file_accept", { fileId });
 }
 
 /** Reject an incoming file transfer. */

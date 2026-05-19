@@ -133,10 +133,8 @@ async function handleSend() {
 
 async function handleAccept() {
   if (!incomingRequest.value) return;
-  // For now, accept with a default port
-  // In a full impl, the receiver port comes from the file_response negotiation
   try {
-    await fileAccept(incomingRequest.value.fileId, 0);
+    await fileAccept(incomingRequest.value.fileId);
   } catch (e) {
     console.error("Accept error:", e);
   }

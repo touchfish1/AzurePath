@@ -220,7 +220,7 @@ pub async fn file_send(
 }
 
 #[tauri::command]
-pub async fn file_accept(file_id: String, receiver_port: u16) -> Result<(), String> {
+pub async fn file_accept(file_id: String) -> Result<(), String> {
     let conn_mgr = match crate::commands::chat::CONN_MGR.get() {
         Some(c) => c,
         None => return Err("Connection manager not initialized".to_string()),
@@ -235,6 +235,12 @@ pub async fn file_accept(file_id: String, receiver_port: u16) -> Result<(), Stri
 
     svc.remove_request_sender(&file_id).await;
 
+    // Use the actual receiver port (started dynamically in FileTransferService::new)
+    let actual_port = svc
+        .get_receiver_port()
+        .await
+        .ok_or("File receiver not ready")?;
+
     // Send FileResponse only to the requesting peer
     conn_mgr
         .send(
@@ -242,7 +248,7 @@ pub async fn file_accept(file_id: String, receiver_port: u16) -> Result<(), Stri
             &crate::types::chat::Frame::FileResponse {
                 file_id,
                 accepted: true,
-                data_port: receiver_port,
+                data_port: actual_port,
             },
         )
         .await?;
