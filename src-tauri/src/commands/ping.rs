@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::LazyLock;
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter};
@@ -8,8 +7,21 @@ use uuid::Uuid;
 use crate::core::ping;
 use crate::types::ping::{PingComplete, PingOptions, PingProgress};
 
-static CANCEL_TOKENS: LazyLock<Mutex<HashMap<String, AtomicBool>>> =
+static CANCEL_TOKENS: LazyLock<Mutex<HashMap<String, bool>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Access CANCEL_TOKENS with automatic Mutex poisoning recovery.
+/// If the Mutex is poisoned (another thread panicked while holding the lock),
+/// we recover via `into_inner()` to keep the system functional.
+fn with_cancel_tokens<F, R>(f: F) -> R
+where
+    F: FnOnce(&mut HashMap<String, bool>) -> R,
+{
+    let mut tokens = CANCEL_TOKENS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    f(&mut *tokens)
+}
 
 #[tauri::command]
 pub async fn ping_start(
@@ -21,10 +33,9 @@ pub async fn ping_start(
     let task_id = Uuid::new_v4().to_string();
 
     // Register cancel token
-    {
-        let mut tokens = CANCEL_TOKENS.lock().map_err(|e| e.to_string())?;
-        tokens.insert(task_id.clone(), AtomicBool::new(false));
-    }
+    with_cancel_tokens(|tokens| {
+        tokens.insert(task_id.clone(), false);
+    });
 
     let task_id_clone = task_id.clone();
     let app_clone = app.clone();
@@ -39,8 +50,8 @@ pub async fn ping_start(
             }));
         }
 
-        // Cleanup cancel token
-        let _ = CANCEL_TOKENS.lock().map(|mut tokens| {
+        // Cleanup cancel token (handles Mutex poisoning gracefully)
+        with_cancel_tokens(|tokens| {
             tokens.remove(&task_id_clone);
         });
     });
@@ -65,7 +76,7 @@ async fn run_ping(
             .arg(opts.timeout_ms.to_string())
             .arg(target)
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stderr(Stdio::null())
             .spawn()
             .map_err(|e| format!("Failed to spawn ping: {}", e))?
     } else {
@@ -77,7 +88,7 @@ async fn run_ping(
             .arg(timeout_s.to_string())
             .arg(target)
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stderr(Stdio::null())
             .spawn()
             .map_err(|e| format!("Failed to spawn ping: {}", e))?
     };
@@ -88,13 +99,9 @@ async fn run_ping(
     let mut ping_results: Vec<ping::PingResult> = Vec::new();
 
     loop {
-        // Check cancellation
-        if let Ok(tokens) = CANCEL_TOKENS.lock() {
-            if let Some(cancel) = tokens.get(task_id) {
-                if cancel.load(Ordering::SeqCst) {
-                    return Ok(());
-                }
-            }
+        // Check cancellation (handles Mutex poisoning gracefully)
+        if with_cancel_tokens(|tokens| tokens.get(task_id).copied().unwrap_or(false)) {
+            return Ok(());
         }
 
         buf.clear();
@@ -156,15 +163,96 @@ async fn run_ping(
     Ok(())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_with_cancel_tokens_basic_insert_and_read() {
+        // Insert a token
+        with_cancel_tokens(|tokens| {
+            tokens.insert("test1".to_string(), true);
+        });
+        // Read it back
+        let val = with_cancel_tokens(|tokens| tokens.get("test1").copied().unwrap_or(false));
+        assert!(val);
+
+        // Update it
+        with_cancel_tokens(|tokens| {
+            if let Some(v) = tokens.get_mut("test1") {
+                *v = false;
+            }
+        });
+        let val = with_cancel_tokens(|tokens| tokens.get("test1").copied().unwrap_or(true));
+        assert!(!val);
+
+        // Clean up
+        with_cancel_tokens(|tokens| {
+            tokens.remove("test1");
+        });
+    }
+
+    #[test]
+    fn test_with_cancel_tokens_missing_key() {
+        let val = with_cancel_tokens(|tokens| tokens.get("nonexistent").copied().unwrap_or(false));
+        assert!(!val);
+    }
+
+    #[test]
+    fn test_with_cancel_tokens_multiple_operations() {
+        with_cancel_tokens(|tokens| {
+            tokens.insert("a".to_string(), false);
+            tokens.insert("b".to_string(), true);
+            tokens.insert("c".to_string(), false);
+        });
+
+        let a = with_cancel_tokens(|tokens| tokens.get("a").copied().unwrap_or(true));
+        let b = with_cancel_tokens(|tokens| tokens.get("b").copied().unwrap_or(false));
+        let c = with_cancel_tokens(|tokens| tokens.get("c").copied().unwrap_or(true));
+        assert!(!a);
+        assert!(b);
+        assert!(!c);
+
+        with_cancel_tokens(|tokens| {
+            tokens.clear();
+        });
+    }
+
+    #[test]
+    fn test_with_cancel_tokens_poison_recovery() {
+        // Poisone the Mutex by panicking while holding the lock
+        let _ = std::panic::catch_unwind(|| {
+            let _lock = CANCEL_TOKENS.lock().unwrap();
+            panic!("intentional poison for test");
+        });
+
+        // After poisoning, with_cancel_tokens should still work via into_inner()
+        with_cancel_tokens(|tokens| {
+            tokens.insert("poison_test".to_string(), true);
+        });
+
+        let val = with_cancel_tokens(|tokens| {
+            tokens.get("poison_test").copied().unwrap_or(false)
+        });
+        assert!(val, "Poisoned mutex should still allow token operations");
+
+        // Clean up
+        with_cancel_tokens(|tokens| {
+            tokens.remove("poison_test");
+        });
+    }
+}
+
 #[tauri::command]
-pub async fn ping_stop(
-    app: AppHandle,
-    task_id: String,
-) -> Result<(), String> {
-    let _ = app;
-    let mut tokens = CANCEL_TOKENS.lock().map_err(|e| e.to_string())?;
-    if let Some(cancel) = tokens.get_mut(&task_id) {
-        cancel.store(true, Ordering::SeqCst);
+pub async fn ping_stop(task_id: String) -> Result<(), String> {
+    if with_cancel_tokens(|tokens| {
+        if let Some(cancel) = tokens.get_mut(&task_id) {
+            *cancel = true;
+            true
+        } else {
+            false
+        }
+    }) {
         Ok(())
     } else {
         Err(format!("Task {} not found", task_id))

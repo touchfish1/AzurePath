@@ -1,3 +1,5 @@
+pub mod icmp;
+
 use tokio::process::Command;
 
 #[cfg(target_os = "windows")]
@@ -240,6 +242,12 @@ fn parse_unix_ping_line(line: &str) -> Option<PingResult> {
         }
     }
 
+    // If we have "bytes from" but no timing info, this is not a valid success line.
+    // Could be a malformed or unexpected output line.
+    if latency_ms < 0.0 {
+        return None;
+    }
+
     Some(PingResult {
         seq,
         latency_ms,
@@ -279,8 +287,10 @@ pub fn compute_stats(results: &[PingResult]) -> PingStats {
         };
     }
 
-    let min_ms = latencies.iter().cloned().fold(f64::MAX, f64::min);
-    let max_ms = latencies.iter().cloned().fold(f64::MIN, f64::max);
+    // Use .reduce() for cleaner semantics; latencies is guaranteed non-empty at this point.
+    // SAFETY: we already returned early if latencies.is_empty(), so unwrap is safe.
+    let min_ms = latencies.iter().copied().reduce(f64::min).unwrap_or(0.0);
+    let max_ms = latencies.iter().copied().reduce(f64::max).unwrap_or(0.0);
     let avg_ms = latencies.iter().sum::<f64>() / latencies.len() as f64;
 
     PingStats {
@@ -290,5 +300,335 @@ pub fn compute_stats(results: &[PingResult]) -> PingStats {
         min_ms,
         avg_ms,
         max_ms,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ============================================================
+    // parse_windows_ping_line tests
+    // ============================================================
+
+    #[test]
+    fn test_windows_success_english() {
+        let line = "Reply from 8.8.8.8: bytes=32 time=11ms TTL=118";
+        let result = parse_windows_ping_line(line).unwrap();
+        assert_eq!(result.status, "success");
+        assert!((result.latency_ms - 11.0).abs() < 1e-9);
+        assert_eq!(result.ttl, 118);
+    }
+
+    #[test]
+    fn test_windows_success_decimal() {
+        let line = "Reply from 8.8.8.8: bytes=32 time=11.2ms TTL=118";
+        let result = parse_windows_ping_line(line).unwrap();
+        assert_eq!(result.status, "success");
+        assert!((result.latency_ms - 11.2).abs() < 1e-9);
+        assert_eq!(result.ttl, 118);
+    }
+
+    #[test]
+    fn test_windows_success_chinese() {
+        let line = "来自 8.8.8.8 的回复: 字节=32 时间=11ms TTL=118";
+        let result = parse_windows_ping_line(line).unwrap();
+        assert_eq!(result.status, "success");
+        assert!((result.latency_ms - 11.0).abs() < 1e-9);
+        assert_eq!(result.ttl, 118);
+    }
+
+    #[test]
+    fn test_windows_timeout_english() {
+        let line = "Request timed out.";
+        let result = parse_windows_ping_line(line).unwrap();
+        assert_eq!(result.status, "timeout");
+        assert_eq!(result.latency_ms, -1.0);
+        assert_eq!(result.ttl, 0);
+    }
+
+    #[test]
+    fn test_windows_timeout_chinese() {
+        let line = "请求超时。";
+        let result = parse_windows_ping_line(line).unwrap();
+        assert_eq!(result.status, "timeout");
+        assert_eq!(result.latency_ms, -1.0);
+    }
+
+    #[test]
+    fn test_windows_unreachable_english() {
+        let line = "Reply from 10.0.0.99: Destination host unreachable.";
+        let result = parse_windows_ping_line(line).unwrap();
+        assert_eq!(result.status, "unreachable");
+        assert_eq!(result.latency_ms, -1.0);
+    }
+
+    #[test]
+    fn test_windows_unreachable_chinese() {
+        let line = "来自 10.0.0.99 的回复: 无法访问目标主机。";
+        let result = parse_windows_ping_line(line).unwrap();
+        assert_eq!(result.status, "unreachable");
+    }
+
+    #[test]
+    fn test_windows_no_match() {
+        let line = "Pinging 8.8.8.8 with 32 bytes of data:";
+        assert!(parse_windows_ping_line(line).is_none());
+    }
+
+    #[test]
+    fn test_windows_empty_line() {
+        assert!(parse_windows_ping_line("").is_none());
+    }
+
+    // ============================================================
+    // parse_unix_ping_line tests
+    // ============================================================
+
+    #[test]
+    fn test_unix_success() {
+        let line = "64 bytes from 8.8.8.8: icmp_seq=1 ttl=118 time=11.2 ms";
+        let result = parse_unix_ping_line(line).unwrap();
+        assert_eq!(result.status, "success");
+        assert!((result.latency_ms - 11.2).abs() < 1e-9);
+        assert_eq!(result.ttl, 118);
+        assert_eq!(result.seq, 1);
+    }
+
+    #[test]
+    fn test_unix_success_no_space_before_ms() {
+        let line = "64 bytes from 8.8.8.8: icmp_seq=1 ttl=118 time=11.2ms";
+        let result = parse_unix_ping_line(line).unwrap();
+        assert_eq!(result.status, "success");
+        assert!((result.latency_ms - 11.2).abs() < 1e-9);
+        assert_eq!(result.ttl, 118);
+    }
+
+    #[test]
+    fn test_unix_missing_time_is_not_success() {
+        // Line has "bytes from" but no "time=" -- should NOT be success
+        let line = "64 bytes from 8.8.8.8: icmp_seq=1 ttl=118";
+        assert!(parse_unix_ping_line(line).is_none());
+    }
+
+    #[test]
+    fn test_unix_no_match() {
+        let line = "PING 8.8.8.8 (8.8.8.8): 56 data bytes";
+        assert!(parse_unix_ping_line(line).is_none());
+    }
+
+    #[test]
+    fn test_unix_empty_line() {
+        assert!(parse_unix_ping_line("").is_none());
+    }
+
+    #[test]
+    fn test_unix_large_seq() {
+        let line = "64 bytes from 8.8.8.8: icmp_seq=99999 ttl=118 time=10.0 ms";
+        let result = parse_unix_ping_line(line).unwrap();
+        assert_eq!(result.seq, 99999);
+        assert!((result.latency_ms - 10.0).abs() < 1e-9);
+    }
+
+    // ============================================================
+    // extract_latency_ms tests
+    // ============================================================
+
+    #[test]
+    fn test_extract_latency_normal() {
+        assert!((extract_latency_ms("time=42ms") - 42.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_extract_latency_decimal() {
+        assert!((extract_latency_ms("time=42.5ms") - 42.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_extract_latency_zero() {
+        assert!((extract_latency_ms("time=0ms") - 0.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_extract_latency_no_ms() {
+        assert!((extract_latency_ms("no milliseconds here") - (-1.0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_extract_latency_empty() {
+        assert!((extract_latency_ms("") - (-1.0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_extract_latency_chinese_utf8() {
+        // Chinese locale: "时间=11ms"
+        let line = "来自 8.8.8.8 的回复: 字节=32 时间=11ms TTL=118";
+        assert!((extract_latency_ms(line) - 11.0).abs() < 1e-9);
+    }
+
+    // ============================================================
+    // extract_ttl tests
+    // ============================================================
+
+    #[test]
+    fn test_extract_ttl_normal() {
+        assert_eq!(extract_ttl("TTL=118"), 118);
+    }
+
+    #[test]
+    fn test_extract_ttl_large() {
+        assert_eq!(extract_ttl("TTL=255"), 255);
+    }
+
+    #[test]
+    fn test_extract_ttl_no_match() {
+        assert_eq!(extract_ttl("no ttl here"), 0);
+    }
+
+    #[test]
+    fn test_extract_ttl_empty() {
+        assert_eq!(extract_ttl(""), 0);
+    }
+
+    #[test]
+    fn test_extract_ttl_prefix() {
+        // TTL= is a substring match, but this case is unrealistic for ping output
+        assert_eq!(extract_ttl("PREFIX_TTL=42_SUFFIX"), 42);
+    }
+
+    // ============================================================
+    // compute_stats tests
+    // ============================================================
+
+    #[test]
+    fn test_stats_normal() {
+        let results = vec![
+            PingResult { seq: 1, latency_ms: 10.0, ttl: 64, status: "success".to_string() },
+            PingResult { seq: 2, latency_ms: 20.0, ttl: 64, status: "success".to_string() },
+            PingResult { seq: 3, latency_ms: 30.0, ttl: 64, status: "success".to_string() },
+        ];
+        let stats = compute_stats(&results);
+        assert_eq!(stats.sent, 3);
+        assert_eq!(stats.received, 3);
+        assert!((stats.loss_percent - 0.0).abs() < 1e-9);
+        assert!((stats.min_ms - 10.0).abs() < 1e-9);
+        assert!((stats.max_ms - 30.0).abs() < 1e-9);
+        assert!((stats.avg_ms - 20.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_stats_all_timeout() {
+        let results = vec![
+            PingResult { seq: 0, latency_ms: -1.0, ttl: 0, status: "timeout".to_string() },
+            PingResult { seq: 0, latency_ms: -1.0, ttl: 0, status: "timeout".to_string() },
+        ];
+        let stats = compute_stats(&results);
+        assert_eq!(stats.sent, 2);
+        assert_eq!(stats.received, 0);
+        assert!((stats.loss_percent - 100.0).abs() < 1e-9);
+        assert!((stats.min_ms - 0.0).abs() < 1e-9);
+        assert!((stats.max_ms - 0.0).abs() < 1e-9);
+        assert!((stats.avg_ms - 0.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_stats_empty() {
+        let results = vec![];
+        let stats = compute_stats(&results);
+        assert_eq!(stats.sent, 0);
+        assert_eq!(stats.received, 0);
+        assert!((stats.loss_percent - 0.0).abs() < 1e-9);
+        assert!((stats.min_ms - 0.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_stats_single_result() {
+        let results = vec![
+            PingResult { seq: 1, latency_ms: 42.0, ttl: 64, status: "success".to_string() },
+        ];
+        let stats = compute_stats(&results);
+        assert!((stats.min_ms - 42.0).abs() < 1e-9);
+        assert!((stats.max_ms - 42.0).abs() < 1e-9);
+        assert!((stats.avg_ms - 42.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_stats_zero_latency() {
+        // Edge case: latency of exactly 0.0 ms should not cause f64::MIN confusion
+        let results = vec![
+            PingResult { seq: 1, latency_ms: 0.0, ttl: 64, status: "success".to_string() },
+        ];
+        let stats = compute_stats(&results);
+        assert!((stats.min_ms - 0.0).abs() < 1e-9);
+        assert!((stats.max_ms - 0.0).abs() < 1e-9);
+        assert!((stats.avg_ms - 0.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_stats_mixed_success_timeout() {
+        let results = vec![
+            PingResult { seq: 1, latency_ms: 15.0, ttl: 64, status: "success".to_string() },
+            PingResult { seq: 0, latency_ms: -1.0, ttl: 0, status: "timeout".to_string() },
+            PingResult { seq: 2, latency_ms: 25.0, ttl: 64, status: "success".to_string() },
+        ];
+        let stats = compute_stats(&results);
+        assert_eq!(stats.sent, 3);
+        assert_eq!(stats.received, 2);
+        assert!((stats.loss_percent - 33.33333333333333).abs() < 1e-9);
+        assert!((stats.min_ms - 15.0).abs() < 1e-9);
+        assert!((stats.max_ms - 25.0).abs() < 1e-9);
+        assert!((stats.avg_ms - 20.0).abs() < 1e-9);
+    }
+
+    // ============================================================
+    // parse_ping_output integration tests
+    // ============================================================
+
+    #[test]
+    fn test_parse_output_empty() {
+        let results = parse_ping_output("");
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_parse_output_mixed_lines() {
+        // Should work on the current platform's parser regardless
+        let output = "\n  \nline without match\n";
+        let results = parse_ping_output(output);
+        assert!(results.is_empty());
+    }
+
+    // ============================================================
+    // decode_ping_output tests
+    // ============================================================
+
+    #[test]
+    fn test_decode_ascii() {
+        let decoded = decode_ping_output(b"Reply from 8.8.8.8: bytes=32 time=11ms TTL=118");
+        assert_eq!(decoded, "Reply from 8.8.8.8: bytes=32 time=11ms TTL=118");
+    }
+
+    #[test]
+    fn test_decode_utf8() {
+        let decoded = decode_ping_output("来自 8.8.8.8 的回复: 时间=11ms".as_bytes());
+        assert_eq!(decoded, "来自 8.8.8.8 的回复: 时间=11ms");
+    }
+
+    #[test]
+    fn test_decode_empty() {
+        let decoded = decode_ping_output(b"");
+        assert_eq!(decoded, "");
+    }
+
+    // ============================================================
+    // PingResult struct tests
+    // ============================================================
+
+    #[test]
+    fn test_ping_stats_default() {
+        let stats = PingStats::default();
+        assert_eq!(stats.sent, 0);
+        assert_eq!(stats.received, 0);
+        assert_eq!(stats.loss_percent, 0.0);
     }
 }

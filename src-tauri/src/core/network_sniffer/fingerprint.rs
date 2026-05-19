@@ -1,46 +1,66 @@
 use regex::Regex;
 use std::sync::LazyLock;
 
-/// A single fingerprint entry matching banner text to service + version.
-pub struct Fingerprint {
-    pub ports: &'static [u16],
-    pub service_name: &'static str,
-    pub pattern: &'static str,
-    pub version_group: Option<usize>,
-    pub confidence: u8,
+/// A compiled fingerprint entry for matching banner text to service + version.
+struct FingerprintDef {
+    ports: &'static [u16],
+    service_name: &'static str,
+    version_group: Option<usize>,
+    confidence: u8,
+    regex: Regex,
 }
 
-/// All known service fingerprints.
-static FINGERPRINTS: LazyLock<Vec<Fingerprint>> = LazyLock::new(|| {
-    vec![
-        // Web servers
-        Fingerprint { ports: &[80, 443, 8080, 8443, 8000, 8888], service_name: "nginx", pattern: r"(?i)Server:\s*nginx(?:/([\d.]+))?", version_group: Some(1), confidence: 95 },
-        Fingerprint { ports: &[80, 443, 8080], service_name: "Apache", pattern: r"(?i)Server:\s*Apache(?:/([\d.]+))?", version_group: Some(1), confidence: 95 },
-        Fingerprint { ports: &[80, 443], service_name: "IIS", pattern: r"(?i)Server:\s*Microsoft-IIS(?:/([\d.]+))?", version_group: Some(1), confidence: 95 },
-        // SSH
-        Fingerprint { ports: &[22], service_name: "OpenSSH", pattern: r"SSH-2\.0-OpenSSH[_-]([\w.]+)", version_group: Some(1), confidence: 95 },
-        Fingerprint { ports: &[22], service_name: "Dropbear", pattern: r"(?i)dropbear", version_group: None, confidence: 85 },
-        // FTP
-        Fingerprint { ports: &[21], service_name: "vsftpd", pattern: r"(?i)vsFTPd(?: ([\w.]+))?", version_group: Some(1), confidence: 90 },
-        Fingerprint { ports: &[21], service_name: "proftpd", pattern: r"(?i)ProFTPD(?: ([\w.]+))?", version_group: Some(1), confidence: 90 },
-        Fingerprint { ports: &[21], service_name: "Pure-FTPd", pattern: r"(?i)Pure-FTPd", version_group: None, confidence: 85 },
-        // MySQL
-        Fingerprint { ports: &[3306], service_name: "MySQL", pattern: r"(?i)mysql|MariaDB", version_group: None, confidence: 80 },
-        // PostgreSQL
-        Fingerprint { ports: &[5432], service_name: "PostgreSQL", pattern: r"(?i)postgres|psql", version_group: None, confidence: 80 },
-        // Redis
-        Fingerprint { ports: &[6379], service_name: "Redis", pattern: r"(?i)redis_version:|\+OK", version_group: None, confidence: 85 },
-        // SMTP
-        Fingerprint { ports: &[25, 587], service_name: "Postfix", pattern: r"(?i)ESMTP\s+Postfix", version_group: None, confidence: 85 },
-        Fingerprint { ports: &[25, 587], service_name: "Sendmail", pattern: r"(?i)ESMTP\s+Sendmail", version_group: None, confidence: 85 },
-        Fingerprint { ports: &[25, 587], service_name: "Exim", pattern: r"(?i)Exim", version_group: None, confidence: 85 },
-        // SMB
-        Fingerprint { ports: &[445], service_name: "Samba", pattern: r"(?i)Samba", version_group: None, confidence: 80 },
-        // DNS
-        Fingerprint { ports: &[53], service_name: "dnsmasq", pattern: r"(?i)dnsmasq", version_group: None, confidence: 75 },
-        // Generic HTTP fallback
-        Fingerprint { ports: &[], service_name: "HTTP", pattern: r"^HTTP/", version_group: None, confidence: 60 },
-    ]
+/// Raw fingerprint definitions (regex patterns compiled once at init).
+const FINGERPRINT_RAW: &[(
+    &[u16],
+    &str,
+    &str,
+    Option<usize>,
+    u8,
+)] = &[
+    // Web servers
+    (&[80, 443, 8080, 8443, 8000, 8888], "nginx", r"(?i)Server:\s*nginx(?:/([\d.]+))?", Some(1), 95),
+    (&[80, 443, 8080], "Apache", r"(?i)Server:\s*Apache(?:/([\d.]+))?", Some(1), 95),
+    (&[80, 443], "IIS", r"(?i)Server:\s*Microsoft-IIS(?:/([\d.]+))?", Some(1), 95),
+    // SSH
+    (&[22], "OpenSSH", r"SSH-2\.0-OpenSSH[_-]([\w.]+)", Some(1), 95),
+    (&[22], "Dropbear", r"(?i)dropbear", None, 85),
+    // FTP
+    (&[21], "vsftpd", r"(?i)vsFTPd(?: ([\w.]+))?", Some(1), 90),
+    (&[21], "proftpd", r"(?i)ProFTPD(?: ([\w.]+))?", Some(1), 90),
+    (&[21], "Pure-FTPd", r"(?i)Pure-FTPd", None, 85),
+    // MySQL
+    (&[3306], "MySQL", r"(?i)mysql|MariaDB", None, 80),
+    // PostgreSQL
+    (&[5432], "PostgreSQL", r"(?i)postgres|psql", None, 80),
+    // Redis
+    (&[6379], "Redis", r"(?i)redis_version:|\+OK", None, 85),
+    // SMTP
+    (&[25, 587], "Postfix", r"(?i)ESMTP\s+Postfix", None, 85),
+    (&[25, 587], "Sendmail", r"(?i)ESMTP\s+Sendmail", None, 85),
+    (&[25, 587], "Exim", r"(?i)Exim", None, 85),
+    // SMB
+    (&[445], "Samba", r"(?i)Samba", None, 80),
+    // DNS
+    (&[53], "dnsmasq", r"(?i)dnsmasq", None, 75),
+    // Generic HTTP fallback
+    (&[], "HTTP", r"^HTTP/", None, 60),
+];
+
+/// Pre-compiled fingerprints — regexes are compiled once at first access.
+static FINGERPRINTS: LazyLock<Vec<FingerprintDef>> = LazyLock::new(|| {
+    FINGERPRINT_RAW
+        .iter()
+        .filter_map(|&(ports, service_name, pattern, version_group, confidence)| {
+            Regex::new(pattern).ok().map(|regex| FingerprintDef {
+                ports,
+                service_name,
+                version_group,
+                confidence,
+                regex,
+            })
+        })
+        .collect()
 });
 
 /// Match a banner to a fingerprint, returning (service_name, version, confidence).
@@ -49,11 +69,12 @@ pub fn match_banner(port: u16, banner: &str, default_service: Option<&str>) -> O
         if !fp.ports.is_empty() && !fp.ports.contains(&port) {
             continue;
         }
-        if let Ok(re) = Regex::new(fp.pattern) {
-            if let Some(caps) = re.captures(banner) {
-                let version = fp.version_group.and_then(|g| caps.get(g)).map(|m| m.as_str().to_string());
-                return Some((fp.service_name.to_string(), version, fp.confidence));
-            }
+        if let Some(caps) = fp.regex.captures(banner) {
+            let version = fp
+                .version_group
+                .and_then(|g| caps.get(g))
+                .map(|m| m.as_str().to_string());
+            return Some((fp.service_name.to_string(), version, fp.confidence));
         }
     }
 
@@ -134,6 +155,26 @@ mod tests {
     use crate::types::network_sniffer::PortResult;
 
     #[test]
+    fn test_all_fingerprints_compile() {
+        // Verify every regex pattern compiles successfully
+        // Using the raw const to avoid requiring LazyLock initialisation
+        for &(_, _, pattern, _, _) in FINGERPRINT_RAW {
+            assert!(
+                Regex::new(pattern).is_ok(),
+                "Failed to compile regex: {}",
+                pattern
+            );
+        }
+    }
+
+    #[test]
+    fn test_fingerprint_lazylock_initialises() {
+        // Accessing FINGERPRINTS triggers LazyLock init — verify no panics
+        let fps = &*FINGERPRINTS;
+        assert!(!fps.is_empty(), "FINGERPRINTS should contain compiled entries");
+    }
+
+    #[test]
     fn test_guess_service() {
         assert_eq!(guess_service_by_port(22), Some("SSH"));
         assert_eq!(guess_service_by_port(80), Some("HTTP"));
@@ -150,6 +191,19 @@ mod tests {
         assert_eq!(service, "nginx");
         assert_eq!(version, Some("1.24.0".to_string()));
         assert!(confidence >= 90);
+    }
+
+    #[test]
+    fn test_match_nginx_wrong_port() {
+        // nginx fingerprint only matches ports [80, 443, 8080, 8443, 8000, 8888]
+        let banner = "HTTP/1.1 200 OK\r\nServer: nginx/1.24.0\r\n";
+        // port 9999 should NOT match nginx; the generic HTTP fingerprint (empty ports=any)
+        // matches banners starting with "HTTP/" on any port
+        let result = match_banner(9999, banner, Some("Unknown"));
+        assert!(result.is_some());
+        let (service, _, _) = result.unwrap();
+        // Generic HTTP fingerprint matches first (it catches "HTTP/" prefix on any port)
+        assert_eq!(service, "HTTP");
     }
 
     #[test]
@@ -178,6 +232,61 @@ mod tests {
         let result = match_banner(6379, banner, None);
         assert!(result.is_some());
         assert_eq!(result.unwrap().0, "Redis");
+    }
+
+    #[test]
+    fn test_match_iis() {
+        let banner = "HTTP/1.1 200 OK\r\nServer: Microsoft-IIS/10.0\r\n";
+        let result = match_banner(80, banner, None);
+        assert!(result.is_some());
+        let (service, version, _) = result.unwrap();
+        assert_eq!(service, "IIS");
+        assert_eq!(version, Some("10.0".to_string()));
+    }
+
+    #[test]
+    fn test_match_vsftpd() {
+        let banner = "220 vsFTPd 3.0.3 ready\r\n";
+        let result = match_banner(21, banner, None);
+        assert!(result.is_some());
+        let (service, version, _) = result.unwrap();
+        assert_eq!(service, "vsftpd");
+        assert_eq!(version, Some("3.0.3".to_string()));
+    }
+
+    #[test]
+    fn test_match_samba() {
+        let banner = "Samba 4.15.0";
+        let result = match_banner(445, banner, None);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().0, "Samba");
+    }
+
+    #[test]
+    fn test_match_generic_http() {
+        // The generic HTTP fingerprint (&[]) matches any port
+        let banner = "HTTP/1.1 200 OK\r\n";
+        let result = match_banner(9999, banner, None);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().0, "HTTP");
+    }
+
+    #[test]
+    fn test_no_match_returns_default() {
+        let banner = "some garbage banner";
+        let result = match_banner(22, banner, Some("SSH"));
+        assert!(result.is_some());
+        let (service, version, conf) = result.unwrap();
+        assert_eq!(service, "SSH");
+        assert!(version.is_none());
+        assert_eq!(conf, 30);
+    }
+
+    #[test]
+    fn test_no_match_no_default() {
+        let banner = "unknown protocol data";
+        let result = match_banner(9999, banner, None);
+        assert!(result.is_none());
     }
 
     #[test]

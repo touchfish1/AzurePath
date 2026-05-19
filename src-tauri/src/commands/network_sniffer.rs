@@ -5,9 +5,10 @@ use crate::types::network_sniffer::{
 use serde_json;
 use std::collections::HashMap;
 use std::net::IpAddr;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 use tauri::{AppHandle, Emitter};
+use tokio::sync::Semaphore;
 use uuid::Uuid;
 
 static SCAN_RESULTS: LazyLock<Mutex<HashMap<String, Vec<DeviceResult>>>> =
@@ -21,6 +22,12 @@ fn parse_cidr(cidr: &str) -> Result<Vec<IpAddr>, String> {
         Some((ip, len)) => {
             let ip: IpAddr = ip.parse().map_err(|e| format!("Invalid IP: {}", e))?;
             let len: u8 = len.parse().map_err(|_| "Invalid CIDR prefix".to_string())?;
+            if len > 32 {
+                return Err(format!(
+                    "Invalid CIDR prefix length {} (must be 0-32)",
+                    len
+                ));
+            }
             (ip, len)
         }
         None => {
@@ -34,24 +41,39 @@ fn parse_cidr(cidr: &str) -> Result<Vec<IpAddr>, String> {
         IpAddr::V6(_) => return Err("IPv6 not supported yet".to_string()),
     };
 
-    let mask = if prefix_len == 0 {
+    // /32: single host
+    if prefix_len == 32 {
+        return Ok(vec![IpAddr::V4(ip_u32.into())]);
+    }
+
+    // /0: entire IPv4 space — too large, will be caught by max-range check below
+    let host_bits = 32 - prefix_len;
+    let mask = if host_bits >= 32 {
+        // Avoid shift overflow: shifting u32 by 32 is UB/panic in debug
         0u32
     } else {
-        !0u32 << (32 - prefix_len)
+        (!0u32) << host_bits
     };
     let network = ip_u32 & mask;
     let broadcast = network | !mask;
+
+    // /31 per RFC 3021: both addresses are usable (no network/broadcast address)
+    if prefix_len == 31 {
+        return Ok(vec![
+            IpAddr::V4((network).into()),
+            IpAddr::V4(broadcast.into()),
+        ]);
+    }
+
     let host_count = broadcast.saturating_sub(network).saturating_sub(1);
     if host_count > 65534 {
         return Err("CIDR range too large (max /16)".to_string());
     }
 
-    let mut ips = Vec::with_capacity(host_count as usize + 1);
+    let mut ips = Vec::with_capacity(host_count as usize);
     for i in 1..=host_count {
         if let Some(host_ip) = network.checked_add(i) {
-            if host_ip < broadcast {
-                ips.push(IpAddr::V4(host_ip.into()));
-            }
+            ips.push(IpAddr::V4(host_ip.into()));
         }
     }
     Ok(ips)
@@ -93,6 +115,32 @@ async fn run_scan(app: AppHandle, task_id: String, options: SnifferOptions) {
         cleanup_task(&task_id);
         return;
     }
+
+    // Validate concurrency settings
+    if options.concurrency_ports == 0 {
+        let _ = app.emit(
+            "sniffer:error",
+            serde_json::json!({
+                "taskId": task_id,
+                "error": "Port concurrency must be > 0".to_string(),
+            }),
+        );
+        cleanup_task(&task_id);
+        return;
+    }
+    if options.concurrency_hosts == 0 {
+        let _ = app.emit(
+            "sniffer:error",
+            serde_json::json!({
+                "taskId": task_id,
+                "error": "Host concurrency must be > 0".to_string(),
+            }),
+        );
+        cleanup_task(&task_id);
+        return;
+    }
+    // TODO: Use options.concurrency_hosts to scan multiple hosts in parallel.
+    // Currently hosts are scanned sequentially.
 
     // 2. Determine ports
     let ports: Vec<u16> = if options.mode == "fast" {
@@ -144,108 +192,152 @@ async fn run_scan(app: AppHandle, task_id: String, options: SnifferOptions) {
     };
     let _ = app.emit("sniffer:progress", &progress);
 
-    // 5. Scan loop
-    let mut all_devices: Vec<DeviceResult> = Vec::new();
-    let mut scanned: u32 = 0;
-    let mut services_found: u32 = 0;
+    // 5. Scan loop — concurrent hosts via Semaphore
+    let semaphore = Arc::new(Semaphore::new(options.concurrency_hosts as usize));
+    let scanned = Arc::new(AtomicU32::new(0));
+    let services_found = Arc::new(AtomicU32::new(0));
+    let devices: Arc<Mutex<Vec<DeviceResult>>> = Arc::new(Mutex::new(Vec::new()));
+    let opts = Arc::new(options);
 
-    for ip in &all_ips {
+    let mut handles = Vec::with_capacity(all_ips.len());
+
+    for ip in all_ips {
         if cancel.load(Ordering::SeqCst) {
             break;
         }
 
-        scanned += 1;
-        let ip_str = ip.to_string();
+        let sem_clone = semaphore.clone();
+        let app = app.clone();
+        let cancel = cancel.clone();
+        let scanned = scanned.clone();
+        let services_found = services_found.clone();
+        let devices = devices.clone();
+        let opts = opts.clone();
+        let ports = ports.clone();
+        let total = total_ips as u32;
 
-        // Emit progress for current target
-        let progress = SnifferProgress {
-            total_hosts: total_ips as u32,
-            scanned_hosts: scanned,
-            services_found,
-            current_target: ip_str.clone(),
-        };
-        let _ = app.emit("sniffer:progress", &progress);
-
-        // TCP ping to check if host is alive
-        let alive = discovery::is_host_alive(*ip, options.timeout_ms).await;
-
-        if alive {
-            // Scan ports
-            let scanned_ports = port_scanner::scan_ports(
-                &ip_str,
-                &ports,
-                options.concurrency_ports as usize,
-                options.timeout_ms,
-                cancel.clone(),
-            )
-            .await;
-
-            // Process each open port: detect service or emit plain port event
-            let mut open_ports: Vec<PortResult> = Vec::with_capacity(scanned_ports.len());
-            for pr in scanned_ports {
-                if options.probe_services {
-                    let detected =
-                        fingerprint::detect_service(&ip_str, pr, options.timeout_ms).await;
-
-                    let _ = app.emit(
-                        "sniffer:port",
-                        serde_json::json!({
-                            "ip": ip_str,
-                            "port": detected.port,
-                            "protocol": detected.protocol,
-                            "state": detected.state,
-                            "service": detected.service,
-                            "version": detected.version,
-                            "banner": detected.banner,
-                            "confidence": detected.confidence,
-                            "probeMethod": detected.probe_method,
-                        }),
-                    );
-
-                    if detected.service.is_some() {
-                        services_found += 1;
-                    }
-                    open_ports.push(detected);
-                } else {
-                    let _ = app.emit(
-                        "sniffer:port",
-                        serde_json::json!({
-                            "ip": ip_str,
-                            "port": pr.port,
-                            "protocol": pr.protocol,
-                            "state": pr.state,
-                            "service": pr.service,
-                            "version": None::<String>,
-                            "banner": None::<String>,
-                            "confidence": pr.confidence,
-                            "probeMethod": pr.probe_method,
-                        }),
-                    );
-                    open_ports.push(pr);
-                }
-            }
-
-            // Resolve hostname and MAC
-            let hostname = discovery::resolve_hostname(&ip_str);
-            let (mac, vendor) = match discovery::resolve_mac(&ip_str) {
-                Some((m, v)) => (Some(m), v),
-                None => (None, None),
+        handles.push(tokio::spawn(async move {
+            // Acquire semaphore permit — limits concurrent host processing
+            let _permit = match sem_clone.acquire_owned().await {
+                Ok(p) => p,
+                Err(_) => return, // semaphore closed
             };
 
-            // Assemble device result
-            let device = os_detect::assemble_device(
-                *ip,
-                hostname,
-                mac,
-                vendor,
-                open_ports,
-                &options.mode,
+            if cancel.load(Ordering::SeqCst) {
+                return;
+            }
+
+            let scanned_val = scanned.fetch_add(1, Ordering::SeqCst) + 1;
+            let svc_found = services_found.load(Ordering::SeqCst);
+            let ip_str = ip.to_string();
+
+            // Emit progress
+            let _ = app.emit(
+                "sniffer:progress",
+                &SnifferProgress {
+                    total_hosts: total,
+                    scanned_hosts: scanned_val,
+                    services_found: svc_found,
+                    current_target: ip_str.clone(),
+                },
             );
 
-            let _ = app.emit("sniffer:device", &device);
-            all_devices.push(device);
-        }
+            // TCP ping to check if host is alive
+            let alive = discovery::is_host_alive(ip, opts.timeout_ms).await;
+
+            if alive {
+                // Scan ports
+                let scanned_ports = port_scanner::scan_ports(
+                    &ip_str,
+                    &ports,
+                    opts.concurrency_ports as usize,
+                    opts.timeout_ms,
+                    cancel.clone(),
+                )
+                .await;
+
+                // Process each open port
+                let mut open_ports: Vec<PortResult> = Vec::with_capacity(scanned_ports.len());
+                for pr in scanned_ports {
+                    if opts.probe_services {
+                        let detected =
+                            fingerprint::detect_service(&ip_str, pr, opts.timeout_ms).await;
+
+                        let _ = app.emit(
+                            "sniffer:port",
+                            serde_json::json!({
+                                "ip": ip_str,
+                                "port": detected.port,
+                                "protocol": detected.protocol,
+                                "state": detected.state,
+                                "service": detected.service,
+                                "version": detected.version,
+                                "banner": detected.banner,
+                                "confidence": detected.confidence,
+                                "probeMethod": detected.probe_method,
+                            }),
+                        );
+
+                        if detected.service.is_some() {
+                            services_found.fetch_add(1, Ordering::SeqCst);
+                        }
+                        open_ports.push(detected);
+                    } else {
+                        let _ = app.emit(
+                            "sniffer:port",
+                            serde_json::json!({
+                                "ip": ip_str,
+                                "port": pr.port,
+                                "protocol": pr.protocol,
+                                "state": pr.state,
+                                "service": pr.service,
+                                "version": None::<String>,
+                                "banner": None::<String>,
+                                "confidence": pr.confidence,
+                                "probeMethod": pr.probe_method,
+                            }),
+                        );
+                        open_ports.push(pr);
+                    }
+                }
+
+                // Resolve hostname and MAC
+                let hostname = discovery::resolve_hostname(&ip_str);
+                let (mac, vendor) = match discovery::resolve_mac(&ip_str) {
+                    Some((m, v)) => (Some(m), v),
+                    None => (None, None),
+                };
+
+                // Assemble device result
+                let device = os_detect::assemble_device(
+                    ip,
+                    hostname,
+                    mac,
+                    vendor,
+                    open_ports,
+                    &opts.mode,
+                );
+
+                let _ = app.emit("sniffer:device", &device);
+
+                // Collect result
+                if let Ok(mut devs) = devices.lock() {
+                    devs.push(device);
+                }
+            }
+        }));
     }
+
+    // Wait for all tasks to complete
+    let all_devices = {
+        for handle in handles {
+            let _ = handle.await;
+        }
+        Arc::try_unwrap(devices)
+            .unwrap_or_else(|_| panic!("devices Arc still referenced"))
+            .into_inner()
+            .unwrap_or_else(|e| e.into_inner())
+    };
 
     // 6. Save results to SCAN_RESULTS
     {
@@ -443,6 +535,87 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_cidr_slash32() {
+        // /32 should return exactly the single host
+        let ips = parse_cidr("192.168.1.42/32").unwrap();
+        assert_eq!(ips.len(), 1);
+        assert_eq!(ips[0].to_string(), "192.168.1.42");
+    }
+
+    #[test]
+    fn test_parse_cidr_slash31() {
+        // /31 per RFC 3021: both addresses are usable (no network/broadcast)
+        let ips = parse_cidr("10.0.0.0/31").unwrap();
+        assert_eq!(ips.len(), 2);
+        assert_eq!(ips[0].to_string(), "10.0.0.0");
+        assert_eq!(ips[1].to_string(), "10.0.0.1");
+    }
+
+    #[test]
+    fn test_parse_cidr_slash31_mid_network() {
+        let ips = parse_cidr("192.168.1.2/31").unwrap();
+        assert_eq!(ips.len(), 2);
+        assert_eq!(ips[0].to_string(), "192.168.1.2");
+        assert_eq!(ips[1].to_string(), "192.168.1.3");
+    }
+
+    #[test]
+    fn test_parse_cidr_prefix_too_large() {
+        // prefix > 32 should return an error (was a panic bug)
+        let result = parse_cidr("192.168.1.0/33");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("must be 0-32"), "Error should mention valid range, got: {}", err);
+    }
+
+    #[test]
+    fn test_parse_cidr_prefix_max_boundary() {
+        let result = parse_cidr("192.168.1.0/99");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_cidr_slash16_at_boundary() {
+        // /16 is the maximum allowed range
+        let ips = parse_cidr("192.168.0.0/16").unwrap();
+        assert_eq!(ips.len(), 65534);
+        assert_eq!(ips[0].to_string(), "192.168.0.1");
+        assert_eq!(ips[65533].to_string(), "192.168.255.254");
+    }
+
+    #[test]
+    fn test_parse_cidr_slash15_too_large() {
+        // /15 is larger than /16, should be rejected
+        let result = parse_cidr("10.0.0.0/15");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_cidr_invalid_prefix_format() {
+        let result = parse_cidr("192.168.1.0/abc");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_cidr_slash0() {
+        // /0 should be rejected as too large
+        let result = parse_cidr("0.0.0.0/0");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_cidr_empty_string() {
+        let result = parse_cidr("");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_cidr_trailing_slash() {
+        let result = parse_cidr("192.168.1.0/");
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn test_csv_escape_no_change() {
         assert_eq!(csv_escape("simple"), "simple");
     }
@@ -455,6 +628,16 @@ mod tests {
     #[test]
     fn test_csv_escape_with_quote() {
         assert_eq!(csv_escape("a\"b"), "\"a\"\"b\"");
+    }
+
+    #[test]
+    fn test_csv_escape_newline() {
+        assert_eq!(csv_escape("a\nb"), "\"a\nb\"");
+    }
+
+    #[test]
+    fn test_csv_escape_already_quoted() {
+        assert_eq!(csv_escape("\"hello\""), "\"\"\"hello\"\"\"");
     }
 
     #[test]
@@ -485,5 +668,60 @@ mod tests {
         assert!(csv.contains("00:11:22:33:44:55"));
         assert!(csv.contains("80"));
         assert!(csv.contains("HTTP"));
+    }
+
+    #[test]
+    fn test_devices_to_csv_no_open_ports() {
+        let devices = vec![DeviceResult {
+            ip: "10.0.0.1".to_string(),
+            hostname: None,
+            mac: None,
+            vendor: None,
+            os: Some("Linux".to_string()),
+            open_ports: vec![],
+            is_alive: true,
+            scan_mode: "fast".to_string(),
+            scan_completed: true,
+        }];
+        let csv = devices_to_csv(&devices);
+        // Header: "ip,hostname,mac,vendor,os,port,protocol,state,service,version,banner"
+        assert!(csv.starts_with("ip,"));
+        // Data row: 10.0.0.1,empty,empty,empty,Linux,,,,,,,
+        assert!(csv.contains("10.0.0.1,,,,Linux"));
+        // The field count should be 11 (header fields)
+        let lines: Vec<&str> = csv.lines().collect();
+        assert_eq!(lines.len(), 2, "Should have header + 1 data row");
+        assert_eq!(
+            lines[1].split(',').count(),
+            11,
+            "CSV data row should have 11 columns"
+        );
+    }
+
+    #[test]
+    fn test_devices_to_csv_empty_devices() {
+        let csv = devices_to_csv(&[]);
+        // Should only have the header row
+        assert_eq!(csv.lines().count(), 1);
+    }
+
+    #[test]
+    fn test_default_presets_contain_expected() {
+        let presets = crate::types::network_sniffer::default_presets();
+        assert!(!presets.is_empty());
+        let top100 = presets.iter().find(|p| p.name == "top100");
+        assert!(top100.is_some());
+        assert!(top100.unwrap().ports.contains(&80));
+        assert!(top100.unwrap().ports.contains(&443));
+    }
+
+    #[test]
+    fn test_sniffer_options_default() {
+        let opts = SnifferOptions::default();
+        assert!(!opts.targets.is_empty());
+        assert!(!opts.ports.is_empty());
+        assert_eq!(opts.mode, "fast");
+        assert!(opts.concurrency_hosts > 0);
+        assert!(opts.concurrency_ports > 0);
     }
 }

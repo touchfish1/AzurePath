@@ -13,6 +13,9 @@ pub async fn scan_ports(
     timeout_ms: u64,
     cancel: Arc<AtomicBool>,
 ) -> Vec<PortResult> {
+    if concurrency == 0 || ports.is_empty() {
+        return Vec::new();
+    }
     let timeout = Duration::from_millis(timeout_ms);
     let semaphore = Arc::new(Semaphore::new(concurrency));
     let mut results = Vec::new();
@@ -104,6 +107,23 @@ mod tests {
         let cancel = Arc::new(AtomicBool::new(true));
         let ports = vec![80, 443, 22, 3306];
         let results = scan_ports("127.0.0.1", &ports, 5, 500, cancel).await;
+        assert!(results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_scan_ports_zero_concurrency() {
+        // concurrency=0 must not panic or deadlock
+        let cancel = Arc::new(AtomicBool::new(false));
+        let ports = vec![80, 443];
+        let results = scan_ports("127.0.0.1", &ports, 0, 500, cancel).await;
+        assert!(results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_scan_ports_empty_ports() {
+        // empty port list must return immediately
+        let cancel = Arc::new(AtomicBool::new(false));
+        let results = scan_ports("127.0.0.1", &[], 5, 500, cancel).await;
         assert!(results.is_empty());
     }
 }

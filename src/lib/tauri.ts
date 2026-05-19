@@ -473,6 +473,7 @@ export interface DeviceResult {
   ip: string;
   hostname: string | null;
   mac: string | null;
+  vendor: string | null;
   os: string | null;
   openPorts: PortResult[];
   isAlive: boolean;

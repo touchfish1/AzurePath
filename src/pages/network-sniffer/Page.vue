@@ -14,6 +14,7 @@ import {
   snifferStart,
   snifferStop,
   snifferPresets,
+  snifferExport,
   onSnifferProgress,
   onSnifferDevice,
   onSnifferPort,
@@ -179,6 +180,25 @@ async function stopScan() {
     }
   }
   scanState.value = "idle";
+}
+
+async function exportResults(format: "json" | "csv") {
+  if (!taskId.value) return;
+  try {
+    const data = await snifferExport(taskId.value, format);
+    const ext = format === "json" ? "json" : "csv";
+    const blob = new Blob([data], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `sniffer-results-${taskId.value.slice(0, 8)}.${ext}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    console.error("导出失败:", e);
+  }
 }
 
 function cleanup() {
@@ -395,7 +415,7 @@ onUnmounted(cleanup);
                 class="w-40 rounded-lg border border-paper-deep bg-paper-warm/50 py-1 pl-7 pr-2 text-xs text-ink outline-none"
               />
             </div>
-            <Button variant="ghost" size="sm">
+            <Button variant="ghost" size="sm" @click="exportResults('json')">
               <Download class="mr-1 h-3 w-3" />
               导出
             </Button>

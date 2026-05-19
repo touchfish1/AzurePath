@@ -27,6 +27,9 @@ pub async fn discover_hosts(
     concurrency: usize,
     timeout_ms: u64,
 ) -> Vec<IpAddr> {
+    if concurrency == 0 || ips.is_empty() {
+        return Vec::new();
+    }
     let semaphore = Arc::new(Semaphore::new(concurrency));
     let mut handles = Vec::with_capacity(ips.len());
 
@@ -137,6 +140,36 @@ mod tests {
     }
 
     #[test]
+    fn test_mac_vendor_vmware_prefixes() {
+        assert_eq!(mac_vendor("00:50:56:FF:FF:FF"), Some("VMware".to_string()));
+        assert_eq!(mac_vendor("00:0C:29:00:00:01"), Some("VMware".to_string()));
+        assert_eq!(mac_vendor("00:05:69:AB:CD:EF"), Some("VMware".to_string()));
+    }
+
+    #[test]
+    fn test_mac_vendor_apple() {
+        assert_eq!(mac_vendor("00:21:6A:12:34:56"), Some("Apple".to_string()));
+        assert_eq!(mac_vendor("00:23:32:AB:CD:EF"), Some("Apple".to_string()));
+        assert_eq!(mac_vendor("00:25:00:11:22:33"), Some("Apple".to_string()));
+        assert_eq!(mac_vendor("00:26:08:44:55:66"), Some("Apple".to_string()));
+    }
+
+    #[test]
+    fn test_mac_vendor_cisco() {
+        assert_eq!(mac_vendor("00:1A:2B:12:34:56"), Some("Cisco".to_string()));
+    }
+
+    #[test]
+    fn test_mac_vendor_empty_mac() {
+        assert_eq!(mac_vendor(""), None);
+    }
+
+    #[test]
+    fn test_mac_vendor_partial_mac() {
+        assert_eq!(mac_vendor("00:50:56"), Some("VMware".to_string()));
+    }
+
+    #[test]
     fn test_arp_parse_windows_format() {
         let ip = "192.168.1.1";
         let arp_output = "  192.168.1.1    00-11-22-33-44-55    dynamic\n";
@@ -148,5 +181,18 @@ mod tests {
                 assert_eq!(mac, "00:11:22:33:44:55");
             }
         }
+    }
+
+    #[tokio::test]
+    async fn test_discover_hosts_zero_concurrency() {
+        let ips = vec!["10.0.0.1".parse::<IpAddr>().unwrap()];
+        let result = discover_hosts(&ips, 0, 100).await;
+        assert!(result.is_empty(), "zero concurrency should return empty");
+    }
+
+    #[tokio::test]
+    async fn test_discover_hosts_empty_ips() {
+        let result = discover_hosts(&[], 5, 100).await;
+        assert!(result.is_empty(), "empty ips should return empty");
     }
 }
