@@ -655,8 +655,14 @@ function jwtHasExpiry(): string | null {
 }
 
 function copyJwt() {
-  const text = `Header:\n${jwtHeader.value}\n\nPayload:\n${jwtPayload.value}`;
-  if (!text) return;
+  const header = jwtHeader.value;
+  const payload = jwtPayload.value;
+  if (!header && !payload) return;
+  const text = header && payload
+    ? `Header:\n${header}\n\nPayload:\n${payload}`
+    : header
+      ? `Header:\n${header}`
+      : `Payload:\n${payload}`;
   navigator.clipboard.writeText(text).then(() => {
     jwtCopied.value = true;
     setTimeout(() => { jwtCopied.value = false; }, 2000);
@@ -675,7 +681,7 @@ function convertTimestamp() {
   tsRelative.value = "";
 
   const val = tsInput.value;
-  if (val === null || val === undefined || isNaN(val)) {
+  if (val === null || val === undefined || (typeof val === 'number' && isNaN(val))) {
     tsError.value = "请输入有效的时间戳";
     return;
   }

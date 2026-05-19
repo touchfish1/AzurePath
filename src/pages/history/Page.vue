@@ -252,9 +252,10 @@ function exportHistory() {
   } else if (exportFormat.value === "csv") {
     const rows = entries.map((e) => ({
       id: e.id,
-      action_type: e.action_type || "",
-      description: e.description || "",
-      metadata: e.metadata || "",
+      content_type: e.content_type,
+      text_content: e.text_content || "",
+      file_paths: e.file_paths?.join("; ") || "",
+      is_favorite: e.is_favorite ? "是" : "否",
       created_at: e.created_at,
     }));
     exportAsCsv(rows, "activity_history");

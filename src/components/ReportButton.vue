@@ -18,7 +18,7 @@ const props = defineProps<Props>();
 
 async function exportReport() {
   if (props.rows.length === 0) {
-    toast.add("warning", "没有数据可导出");
+    toast.add("info", "没有数据可导出");
     return;
   }
 

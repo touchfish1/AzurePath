@@ -38,13 +38,17 @@ let canvasHeight = 600;
 function initNodes() {
   const centerX = canvasWidth / 2;
   const centerY = canvasHeight / 2;
-  nodes.value = peers.value.map((peer) => ({
-    x: centerX + (Math.random() - 0.5) * 400,
-    y: centerY + (Math.random() - 0.5) * 400,
-    vx: 0,
-    vy: 0,
-    peer,
-  }));
+  const existingPos = new Map(nodes.value.map((n) => [n.peer.ip, { x: n.x, y: n.y }]));
+  nodes.value = peers.value.map((peer) => {
+    const existing = existingPos.get(peer.ip);
+    return {
+      x: existing ? existing.x : centerX + (Math.random() - 0.5) * 400,
+      y: existing ? existing.y : centerY + (Math.random() - 0.5) * 400,
+      vx: 0,
+      vy: 0,
+      peer,
+    };
+  });
 }
 
 function simulateForces() {
@@ -106,12 +110,24 @@ function getSubnets(): Map<string, PeerInfo[]> {
   return subnets;
 }
 
+function getThemeColors() {
+  const style = getComputedStyle(document.documentElement);
+  return {
+    nodeFill: style.getPropertyValue('--color-ink').trim() || '#1e293b',
+    labelColor: style.getPropertyValue('--color-paper').trim() || '#f8fafc',
+    textFaint: style.getPropertyValue('--color-ink-faint').trim() || '#94a3b8',
+    inkSoft: style.getPropertyValue('--color-ink-soft').trim() || '#64748b',
+  };
+}
+
 function draw() {
   const canvas = canvasRef.value;
   if (!canvas) return;
 
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
+
+  const colors = getThemeColors();
 
   // Update canvas size
   const rect = canvas.getBoundingClientRect();
@@ -160,7 +176,7 @@ function draw() {
     // Main circle
     ctx.beginPath();
     ctx.arc(x, y, 22, 0, Math.PI * 2);
-    ctx.fillStyle = isSelected ? "#22c55e" : "#1e293b";
+    ctx.fillStyle = isSelected ? "#22c55e" : colors.nodeFill;
     ctx.fill();
 
     // Inner highlight
@@ -172,7 +188,7 @@ function draw() {
     ctx.fill();
 
     // Label
-    ctx.fillStyle = "#f8fafc";
+    ctx.fillStyle = colors.labelColor;
     ctx.font = "10px monospace";
     ctx.textAlign = "center";
     const label = node.peer.hostname || node.peer.ip;
@@ -180,7 +196,7 @@ function draw() {
 
     // OS label
     if (node.peer.os) {
-      ctx.fillStyle = "rgba(148, 163, 184, 0.6)";
+      ctx.fillStyle = colors.inkSoft + "99";
       ctx.font = "8px sans-serif";
       ctx.fillText(node.peer.os, x, y + 50);
     }

@@ -247,19 +247,22 @@ onMounted(async () => {
   unlistenUpdate = await listen<MonitorUpdate>("monitor:update", (event) => {
     const update = event.payload;
     liveUpdates.value[update.targetId] = update;
-    // Auto-refresh chart for selected target
+    // Auto-refresh chart for selected target (deduplicate by timestamp)
     if (update.targetId === selectedTargetId.value) {
-      historyData.value.push({
-        id: 0,
-        targetId: update.targetId,
-        targetHost: update.targetHost,
-        timestamp: update.timestamp,
-        latencyMs: update.latencyMs,
-        lossRate: update.lossRate,
-      });
-      // Keep only last 1000 points visible
-      if (historyData.value.length > 1000) {
-        historyData.value = historyData.value.slice(-1000);
+      const exists = historyData.value.some((r) => r.timestamp === update.timestamp && r.targetId === update.targetId);
+      if (!exists) {
+        historyData.value.push({
+          id: 0,
+          targetId: update.targetId,
+          targetHost: update.targetHost,
+          timestamp: update.timestamp,
+          latencyMs: update.latencyMs,
+          lossRate: update.lossRate,
+        });
+        // Keep only last 1000 points visible
+        if (historyData.value.length > 1000) {
+          historyData.value = historyData.value.slice(-1000);
+        }
       }
     }
   });
@@ -276,10 +279,9 @@ onUnmounted(() => {
 
 // Watch target change to reload history
 watch(selectedTargetId, async (id) => {
+  historyData.value = [];
   if (id) {
     await loadHistory();
-  } else {
-    historyData.value = [];
   }
 });
 </script>
@@ -293,7 +295,7 @@ watch(selectedTargetId, async (id) => {
         <p class="mt-0.5 text-sm text-ink-faint">定时 Ping 目标主机，记录延迟趋势（Smokeping 风格）</p>
       </div>
       <Button
-        :variant="running ? 'danger' : 'primary'"
+        :variant="running ? 'danger' : 'default'"
         @click="running ? stopMonitor() : startMonitor()"
       >
         <Square v-if="running" class="mr-1.5 h-3.5 w-3.5" />
@@ -385,9 +387,9 @@ watch(selectedTargetId, async (id) => {
           <div v-if="liveUpdates[t.id]" class="px-4 pb-2 text-xs">
             <span
               class="inline-block rounded-full px-2 py-0.5"
-              :class="liveUpdates[t.id].lossRate > 0 ? 'bg-red-100 text-red-600' : 'bg-bamboo/10 text-bamboo'"
+              :class="(liveUpdates[t.id]?.lossRate ?? 0) > 0 ? 'bg-red-100 text-red-600' : 'bg-bamboo/10 text-bamboo'"
             >
-              {{ liveUpdates[t.id].latencyMs !== null ? liveUpdates[t.id].latencyMs.toFixed(1) + ' ms' : '超时' }}
+              {{ liveUpdates[t.id]?.latencyMs != null ? liveUpdates[t.id]!.latencyMs!.toFixed(1) + ' ms' : '超时' }}
             </span>
           </div>
         </div>
@@ -436,14 +438,14 @@ watch(selectedTargetId, async (id) => {
               class="w-full h-full max-h-[300px]"
               preserveAspectRatio="xMidYMid meet"
             >
-              <!-- Grid lines -->
+              <!-- Grid lines (5 positions matching chart: padTop=20, chartH=150) -->
               <line
-                v-for="i in 4"
+                v-for="i in 5"
                 :key="'g'+i"
                 :x1="60"
-                :y1="20 + (i-1) * 45"
+                :y1="20 + (i-1) * 37.5"
                 :x2="680"
-                :y2="20 + (i-1) * 45"
+                :y2="20 + (i-1) * 37.5"
                 stroke="currentColor"
                 stroke-opacity="0.1"
                 stroke-dasharray="4,4"
@@ -453,7 +455,7 @@ watch(selectedTargetId, async (id) => {
                 v-for="i in 5"
                 :key="'yl'+i"
                 :x="55"
-                :y="24 + (i-1) * 45"
+                :y="24 + (i-1) * 37.5"
                 text-anchor="end"
                 class="text-[10px] fill-ink-faint"
               >

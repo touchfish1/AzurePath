@@ -2,11 +2,8 @@
 import { ref, onMounted, onUnmounted, computed, watch, nextTick } from "vue";
 import { Play, Square, Activity } from "lucide-vue-next";
 import Button from "@/components/ui/button/Button.vue";
-import { useToastStore } from "@/stores/toast";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-
-const toast = useToastStore();
 
 interface InterfaceInfo {
   name: string;
@@ -48,15 +45,6 @@ function formatBps(bps: number): string {
   return `${(bps / (1024 * 1024)).toFixed(2)} Mb/s`;
 }
 
-// Format total bytes
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}
-
 const currentDownload = computed(() => {
   const last = downloadHistory.value[downloadHistory.value.length - 1];
   return last ?? 0;
@@ -65,13 +53,6 @@ const currentDownload = computed(() => {
 const currentUpload = computed(() => {
   const last = uploadHistory.value[uploadHistory.value.length - 1];
   return last ?? 0;
-});
-
-const selectedInterfaceInfo = computed(() => {
-  if (selectedInterface.value === "*") {
-    return { friendlyName: "全部接口", ip: "" };
-  }
-  return interfaces.value.find(i => i.name === selectedInterface.value) || { friendlyName: "未知", ip: "" };
 });
 
 async function loadInterfaces() {
@@ -111,6 +92,9 @@ async function stopMonitor() {
 }
 
 function handleData(samples: BandwidthSample[]) {
+  // Clear any previous error when new data arrives
+  if (samples.length > 0) error.value = "";
+
   const sample = samples.find(s => s.interface === selectedInterface.value)
     || (selectedInterface.value === "*" ? samples.find(s => s.interface === "*") : null);
 
@@ -192,41 +176,40 @@ function drawChart() {
   }
 
   const count = downloadHistory.value.length;
-  const xStep = count > 1 ? plotW / (count - 1) : plotW;
 
   // Helper: draw a filled path
-  function drawLinePath(data: number[], color: string) {
-    ctx.beginPath();
+  function drawLinePath(c: CanvasRenderingContext2D, data: number[], color: string) {
+    c.beginPath();
     data.forEach((val, i) => {
       const x = padding.left + (count > 1 ? (i / (count - 1)) * plotW : plotW / 2);
       const y = padding.top + plotH - (val / yMax) * plotH;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
+      if (i === 0) c.moveTo(x, y);
+      else c.lineTo(x, y);
     });
 
     // Line
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 2;
-    ctx.stroke();
+    c.strokeStyle = color;
+    c.lineWidth = 2;
+    c.stroke();
 
     // Fill area under the line
     const lastX = padding.left + plotW;
     const bottomY = padding.top + plotH;
-    ctx.lineTo(lastX, bottomY);
-    ctx.lineTo(padding.left, bottomY);
-    ctx.closePath();
+    c.lineTo(lastX, bottomY);
+    c.lineTo(padding.left, bottomY);
+    c.closePath();
 
-    const grad = ctx.createLinearGradient(0, padding.top, 0, padding.top + plotH);
+    const grad = c.createLinearGradient(0, padding.top, 0, padding.top + plotH);
     grad.addColorStop(0, color + "40");
     grad.addColorStop(1, color + "05");
-    ctx.fillStyle = grad;
-    ctx.fill();
+    c.fillStyle = grad;
+    c.fill();
   }
 
   // Draw download (green)
-  drawLinePath(downloadHistory.value, "#10b981");
+  drawLinePath(ctx, downloadHistory.value, "#10b981");
   // Draw upload (blue)
-  drawLinePath(uploadHistory.value, "#3b82f6");
+  drawLinePath(ctx, uploadHistory.value, "#3b82f6");
 
   // X-axis labels (show every ~10 data points)
   ctx.fillStyle = "#9ca3af";
@@ -266,6 +249,8 @@ watch(selectedInterface, () => {
   }
 });
 
+let resizeObserver: ResizeObserver | null = null;
+
 onMounted(async () => {
   await loadInterfaces();
 
@@ -277,19 +262,8 @@ onMounted(async () => {
     error.value = event.payload.error;
     running.value = false;
   });
-});
 
-onUnmounted(() => {
-  if (running.value) {
-    invoke("stop_bandwidth_monitor").catch(() => {});
-  }
-  unlistenData?.();
-  unlistenError?.();
-});
-
-// Resize observer for canvas
-let resizeObserver: ResizeObserver | null = null;
-onMounted(() => {
+  // Resize observer for canvas
   const canvas = canvasRef.value;
   if (canvas) {
     resizeObserver = new ResizeObserver(() => {
@@ -300,6 +274,11 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  if (running.value) {
+    invoke("stop_bandwidth_monitor").catch(() => {});
+  }
+  unlistenData?.();
+  unlistenError?.();
   resizeObserver?.disconnect();
 });
 </script>

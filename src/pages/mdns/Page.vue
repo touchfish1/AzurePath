@@ -210,7 +210,7 @@ onUnmounted(() => {
               >
                 <td class="px-5 py-3">
                   <button
-                    class="flex items-center gap-1 text-ink hover:text-bamboo transition-colors"
+                    class="group flex items-center gap-1 text-ink hover:text-bamboo transition-colors"
                     @click="copyValue(svc.hostname)"
                     :title="'点击复制: ' + svc.hostname"
                   >

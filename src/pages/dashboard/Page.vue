@@ -234,9 +234,9 @@ const monitorSparklines = computed(() => {
   const colors = ["#22c55e", "#3b82f6", "#f59e0b"];
 
   let idx = 0;
-  for (const [targetId, records] of Object.entries(groups)) {
-    const validRecords = records.filter((r) => r.latencyMs !== null) as { timestamp: string; latencyMs: number; }[];
-    if (validRecords.length < 2) {
+  for (const [, records] of Object.entries(groups)) {
+    const withLatency = records.filter((r): r is MonitorPingRecord & { latencyMs: number } => r.latencyMs !== null);
+    if (withLatency.length < 2) {
       idx++;
       continue;
     }
@@ -250,16 +250,16 @@ const monitorSparklines = computed(() => {
     const cW = w - pL - pR;
     const cH = h - pT - pB;
 
-    const latencies = validRecords.map((r) => r.latencyMs);
+    const latencies = withLatency.map((r) => r.latencyMs);
     const minLat = Math.min(...latencies);
     const maxLat = Math.max(...latencies);
     const lRange = Math.max(maxLat - minLat, 1);
-    const times = validRecords.map((r) => new Date(r.timestamp).getTime());
+    const times = withLatency.map((r) => new Date(r.timestamp).getTime());
     const minTime = Math.min(...times);
     const maxTime = Math.max(...times);
     const tRange = Math.max(maxTime - minTime, 1);
 
-    const pts = validRecords.map((r) => ({
+    const pts = withLatency.map((r) => ({
       x: pL + ((new Date(r.timestamp).getTime() - minTime) / tRange) * cW,
       y: pT + cH - ((r.latencyMs - minLat) / lRange) * cH,
     }));
@@ -269,8 +269,11 @@ const monitorSparklines = computed(() => {
       path += ` L ${pts[i].x} ${pts[i].y}`;
     }
 
+    const latestRecord = withLatency[withLatency.length - 1];
+    const hostName = latestRecord.targetHost || "";
+    const msLabel = `${latestRecord.latencyMs.toFixed(0)} ms`;
     result.push({
-      targetHost: validRecords[0].latencyMs.toFixed(0) + " ms",
+      targetHost: hostName ? `${hostName} — ${msLabel}` : msLabel,
       path,
       color: colors[idx % colors.length],
     });
@@ -279,6 +282,10 @@ const monitorSparklines = computed(() => {
 
   return result;
 });
+
+const chartLinesWithPoints = computed(() =>
+  chartLines.value.filter((l) => l.points.length > 0),
+);
 
 const hasChartData = computed(() => uniqueTargets.value.length > 0);
 const hasHeatmapData = computed(() => portData.value.length > 0);
@@ -438,9 +445,8 @@ onMounted(() => {
             />
             <!-- Data points (last point per line) -->
             <circle
-              v-for="(line, i) in chartLines"
+              v-for="(line, i) in chartLinesWithPoints"
               :key="'lp'+i"
-              v-if="line.points.length > 0"
               :cx="line.points[line.points.length - 1].x"
               :cy="line.points[line.points.length - 1].y"
               :r="3"

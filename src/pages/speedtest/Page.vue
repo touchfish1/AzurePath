@@ -56,16 +56,17 @@ async function start() {
   progress.value = null;
 
   try {
-    await startSpeedtest(peerIp.value, port.value, duration.value, mode.value);
     await attachListeners();
+    await startSpeedtest(peerIp.value, port.value, duration.value, mode.value);
   } catch (e) {
     running.value = false;
+    detachListeners();
     toast.add("error", String(e));
   }
 }
 
 function stop() {
-  // Speedtest cannot be stopped mid-way, but switching mode resets
+  // Reset UI state (Rust backend speedtest cannot be cancelled mid-way)
   running.value = false;
   progress.value = null;
   detachListeners();

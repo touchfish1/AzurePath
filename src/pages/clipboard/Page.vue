@@ -24,7 +24,7 @@ import {
   type ClipboardEntry,
 } from "@/lib/tauri";
 import { formatTime, truncate } from "@/lib/format";
-import { exportAsJson, exportAsCsv, exportAsHtml } from "@/lib/export";
+import { exportAsCsv, exportAsHtml } from "@/lib/export";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
 const entries = ref<ClipboardEntry[]>([]);
@@ -272,12 +272,12 @@ async function batchExport() {
   if (count === 0) return;
   try {
     const ids = Array.from(selectedIds.value);
-    const entries = entries.value.filter((e) => ids.includes(e.id));
+    const selectedEntries = entries.value.filter((e) => ids.includes(e.id));
 
     if (exportFormat.value === "json") {
       await clipboardExport(ids, "json");
     } else if (exportFormat.value === "csv") {
-      const rows = entries.map((e) => ({
+      const rows = selectedEntries.map((e) => ({
         id: e.id,
         content_type: e.content_type,
         text_content: e.text_content || "",
@@ -288,7 +288,7 @@ async function batchExport() {
       }));
       exportAsCsv(rows, "clipboard_export");
     } else if (exportFormat.value === "html") {
-      const rows = entries.map((e) => ({
+      const rows = selectedEntries.map((e) => ({
         id: e.id,
         content_type: e.content_type,
         text_content: e.text_content || "",

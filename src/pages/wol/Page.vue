@@ -59,6 +59,11 @@ async function sendWol(macAddr?: string, broadcastIpAddr?: string, portNum?: num
     sending.value = false;
     return;
   }
+  if (!isValidMac(targetMac)) {
+    error.value = "MAC 地址格式无效，请使用 XX:XX:XX:XX:XX:XX 格式";
+    sending.value = false;
+    return;
+  }
 
   try {
     const res = await invoke<WolResult>("wol_send", {
@@ -74,9 +79,17 @@ async function sendWol(macAddr?: string, broadcastIpAddr?: string, portNum?: num
   }
 }
 
+function isValidMac(mac: string): boolean {
+  return /^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$/.test(mac.trim());
+}
+
 async function saveRecord() {
   if (!mac.value.trim() || !label.value.trim()) {
     error.value = "请填写 MAC 地址和标签";
+    return;
+  }
+  if (!isValidMac(mac.value)) {
+    error.value = "MAC 地址格式无效，请使用 XX:XX:XX:XX:XX:XX 格式";
     return;
   }
 
@@ -110,6 +123,8 @@ function copyMac(macAddr: string) {
   navigator.clipboard.writeText(macAddr).then(() => {
     copiedId.value = macAddr;
     setTimeout(() => { copiedId.value = null; }, 2000);
+  }).catch(() => {
+    // Clipboard write might fail in some contexts
   });
 }
 

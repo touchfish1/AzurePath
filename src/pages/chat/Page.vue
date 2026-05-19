@@ -649,7 +649,7 @@ async function copyDownloadUrl(t: FileTransfer) {
       <div
         v-if="incomingRequest"
         class="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm"
-        @click.self="incomingRequest = null"
+        @click.self="handleReject"
       >
         <div class="noise-bg w-96 rounded-xl border border-paper-deep/60 bg-paper p-6 shadow-lg">
           <div class="flex items-center justify-between mb-4">
