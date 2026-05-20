@@ -325,11 +325,11 @@ mod tests {
         store.save_group(&g1).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(10));
 
-        let mut g2 = make_group("second", &[]);
+        let g2 = make_group("second", &[]);
         store.save_group(&g2).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(10));
 
-        let mut g3 = make_group("third", &[]);
+        let g3 = make_group("third", &[]);
         store.save_group(&g3).unwrap();
 
         let list = store.list_groups().unwrap();
