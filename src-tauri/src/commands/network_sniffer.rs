@@ -140,9 +140,6 @@ async fn run_scan(app: AppHandle, task_id: String, options: SnifferOptions) {
         cleanup_task(&task_id);
         return;
     }
-    // TODO: Use options.concurrency_hosts to scan multiple hosts in parallel.
-    // Currently hosts are scanned sequentially.
-
     // 2. Determine ports
     let ports: Vec<u16> = if options.mode == "fast" {
         port_scanner::top_ports()
