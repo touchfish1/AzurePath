@@ -95,12 +95,14 @@ pub async fn clipboard_copy(id: String, app: AppHandle) -> Result<(), String> {
         "image" => {
             let path = entry.image_path.as_ref()
                 .ok_or("Image entry has no image_path")?;
-            let raw = std::fs::read(path)
+            let raw = tokio::fs::read(path)
+                .await
                 .map_err(|e| format!("Failed to read image: {}", e))?;
 
             // Derive metadata path from the image path
             let meta_path = std::path::Path::new(path).with_extension("json");
-            let meta_content = std::fs::read_to_string(&meta_path)
+            let meta_content = tokio::fs::read_to_string(&meta_path)
+                .await
                 .map_err(|e| format!("Failed to read image metadata: {}", e))?;
             let meta: serde_json::Value = serde_json::from_str(&meta_content)
                 .map_err(|e| format!("Failed to parse image metadata: {}", e))?;
@@ -155,7 +157,8 @@ pub async fn clipboard_export(ids: Vec<String>, format: String) -> Result<String
         .ok_or_else(|| "Cannot find home directory".to_string())?
         .join("AzurePath")
         .join("exports");
-    std::fs::create_dir_all(&export_dir)
+    tokio::fs::create_dir_all(&export_dir)
+        .await
         .map_err(|e| format!("Failed to create exports directory: {}", e))?;
 
     let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
@@ -165,7 +168,8 @@ pub async fn clipboard_export(ids: Vec<String>, format: String) -> Result<String
             let content = serde_json::to_string_pretty(&entries)
                 .map_err(|e| format!("Failed to serialize: {}", e))?;
             let file_path = export_dir.join(format!("clipboard_{}.json", timestamp));
-            std::fs::write(&file_path, content)
+            tokio::fs::write(&file_path, content)
+                .await
                 .map_err(|e| format!("Failed to write file: {}", e))?;
             Ok(file_path.to_string_lossy().to_string())
         }
@@ -187,7 +191,8 @@ pub async fn clipboard_export(ids: Vec<String>, format: String) -> Result<String
                 content.push_str(&format!("Created: {}\n\n", entry.created_at));
             }
             let file_path = export_dir.join(format!("clipboard_{}.txt", timestamp));
-            std::fs::write(&file_path, content)
+            tokio::fs::write(&file_path, content)
+                .await
                 .map_err(|e| format!("Failed to write file: {}", e))?;
             Ok(file_path.to_string_lossy().to_string())
         }

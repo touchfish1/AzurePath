@@ -1,18 +1,22 @@
 <script setup lang="ts">
-import { onMounted } from "vue";
+import { onMounted, watch } from "vue";
 import { Star, Trash2, Search } from "lucide-vue-next";
 import Button from "@/components/ui/button/Button.vue";
 import { useBookmarkStore } from "@/stores/bookmark";
 import { useToastStore } from "@/stores/toast";
 import { ref, computed } from "vue";
+import { useDebounceFn } from "@vueuse/core";
 
 const store = useBookmarkStore();
 const toast = useToastStore();
 const searchQuery = ref("");
+const debouncedSearchQuery = ref("");
+const searchDebounced = useDebounceFn((v: string) => { debouncedSearchQuery.value = v; }, 250);
+watch(searchQuery, (v) => searchDebounced(v));
 
 const filteredBookmarks = computed(() => {
-  if (!searchQuery.value.trim()) return store.bookmarks;
-  const q = searchQuery.value.toLowerCase();
+  if (!debouncedSearchQuery.value.trim()) return store.bookmarks;
+  const q = debouncedSearchQuery.value.toLowerCase();
   return store.bookmarks.filter(
     (b) => b.label.toLowerCase().includes(q) || b.target.toLowerCase().includes(q),
   );

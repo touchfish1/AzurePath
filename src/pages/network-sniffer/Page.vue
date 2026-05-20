@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onUnmounted } from "vue";
+import { watch } from "vue";
+import { useDebounceFn } from "@vueuse/core";
 import { sendSystemNotification } from "@/composables/useNotification";
 import {
   Play,
@@ -90,6 +92,9 @@ const progress = ref<SnifferProgress | null>(null);
 const errorMsg = ref("");
 const filterService = ref("all");
 const searchQuery = ref("");
+const debouncedSearchQuery = ref("");
+const searchDebounced = useDebounceFn((v: string) => { debouncedSearchQuery.value = v; }, 250);
+watch(searchQuery, (v) => searchDebounced(v));
 const showPortModal = ref(false);
 const concurrencyHosts = ref(10);
 const concurrencyPorts = ref(50);
@@ -124,8 +129,8 @@ const serviceOptions = computed(() => {
 
 const filteredDevices = computed(() => {
   return devices.value.filter((d) => {
-    if (searchQuery.value) {
-      const q = searchQuery.value.toLowerCase();
+    if (debouncedSearchQuery.value) {
+      const q = debouncedSearchQuery.value.toLowerCase();
       if (
         !d.ip.toLowerCase().includes(q) &&
         !d.hostname?.toLowerCase().includes(q) &&

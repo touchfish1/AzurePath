@@ -1,5 +1,6 @@
+use std::collections::HashSet;
 use std::net::Ipv4Addr;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 use tauri::{AppHandle, Emitter};
 
@@ -163,9 +164,11 @@ async fn run_discovery(
     let total = host_count.min(254); // Safety cap
 
     // ============================================================
-    // Phase 1: Ping sweep
+    // Phase 1: Concurrent ping sweep (Semaphore = 50)
     // ============================================================
-    let mut alive_hosts: Vec<String> = Vec::new();
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(50));
+    let completed = Arc::new(AtomicU32::new(0));
+    let mut handles = Vec::new();
 
     for i in 0..total {
         if cancel.load(Ordering::Relaxed) {
@@ -185,24 +188,45 @@ async fn run_discovery(
         }
 
         let ip_str = ip.to_string();
+        let sem = semaphore.clone();
+        let cancel = cancel.clone();
+        let app_clone = app.clone();
+        let completed = completed.clone();
 
-        let _ = app.emit(
-            "topology:progress",
-            DiscoverProgress {
-                progress: (i as f64 / total as f64) * 50.0,
-                phase: "scan".to_string(),
-                current_ip: ip_str.clone(),
-                nodes_found: alive_hosts.len() as u32,
-                message: format!("扫描 {} ({}/{})", ip_str, i + 1, total),
-            },
-        );
+        handles.push(tokio::spawn(async move {
+            let _permit = sem.acquire().await.expect("Semaphore closed");
 
-        // Quick ping with 1 packet, 2s timeout
-        if let Ok(output) = ping::execute_ping(&ip_str, 1, 2000).await {
-            let results = ping::parse_ping_output(&output);
-            if results.iter().any(|r| r.status == "success") {
-                alive_hosts.push(ip_str);
+            if cancel.load(Ordering::Relaxed) {
+                return None;
             }
+
+            let done = completed.fetch_add(1, Ordering::Relaxed) + 1;
+            let _ = app_clone.emit(
+                "topology:progress",
+                DiscoverProgress {
+                    progress: (done as f64 / total as f64) * 50.0,
+                    phase: "scan".to_string(),
+                    current_ip: ip_str.clone(),
+                    nodes_found: 0,
+                    message: format!("扫描 {} ({}/{})", ip_str, done, total),
+                },
+            );
+
+            // Quick ping with 1 packet, 2s timeout
+            if let Ok(output) = ping::execute_ping(&ip_str, 1, 2000).await {
+                let results = ping::parse_ping_output(&output);
+                if results.iter().any(|r| r.status == "success") {
+                    return Some(ip_str);
+                }
+            }
+            None
+        }));
+    }
+
+    let mut alive_hosts: HashSet<String> = HashSet::new();
+    for handle in handles {
+        if let Some(ip) = handle.await.unwrap_or(None) {
+            alive_hosts.insert(ip);
         }
     }
 
@@ -211,6 +235,7 @@ async fn run_discovery(
     // ============================================================
     let mut nodes: Vec<DiscoveredNode> = Vec::new();
     let mut links: Vec<DiscoveredLink> = Vec::new();
+    let mut link_set: HashSet<(String, String)> = HashSet::new();
 
     // Identify gateway candidates
     let gw_ip = if prefix_len >= 24 {
@@ -259,10 +284,10 @@ async fn run_discovery(
     }
 
     // Process remaining hosts
-    let known_ips: std::collections::HashSet<String> =
-        nodes.iter().map(|n| n.ip.clone()).collect();
+    let known_ips: HashSet<String> = nodes.iter().map(|n| n.ip.clone()).collect();
 
     let total_trace = alive_hosts.len().max(1);
+    let inner_semaphore = Arc::new(tokio::sync::Semaphore::new(50));
 
     for (idx, host) in alive_hosts.iter().enumerate() {
         if cancel.load(Ordering::Relaxed) {
@@ -303,33 +328,57 @@ async fn run_discovery(
             });
         }
 
-        // Measure pairwise latency to already-processed nodes
-        for other_node in &nodes {
+        // Measure pairwise latency to already-processed nodes (concurrent)
+        let current_nodes: Vec<DiscoveredNode> = nodes.clone();
+        let mut ping_handles = Vec::new();
+
+        for other_node in &current_nodes {
             if other_node.ip == *host {
                 continue;
             }
 
-            // Only probe if not already linked
-            if links.iter().any(|l| {
-                (l.source == *host && l.target == other_node.ip)
-                    || (l.source == other_node.ip && l.target == *host)
-            }) {
+            // O(1) lookup via HashSet instead of O(n) Vec scan
+            let key1 = (host.clone(), other_node.ip.clone());
+            let key2 = (other_node.ip.clone(), host.clone());
+            if link_set.contains(&key1) || link_set.contains(&key2) {
                 continue;
             }
 
-            // Quick 1-ping to check connectivity
-            if let Ok(output) = ping::execute_ping(&other_node.ip, 1, 1000).await {
-                let results = ping::parse_ping_output(&output);
-                if let Some(r) = results.first() {
-                    if r.status == "success" {
-                        links.push(DiscoveredLink {
-                            source: host.clone(),
-                            target: other_node.ip.clone(),
-                            hop_count: 1,
-                            latency_ms: Some(r.latency_ms),
-                        });
+            let sem = inner_semaphore.clone();
+            let cancel = cancel.clone();
+            let target_ip = other_node.ip.clone();
+            let source_ip = host.clone();
+
+            ping_handles.push(tokio::spawn(async move {
+                let _permit = sem.acquire().await.expect("Semaphore closed");
+
+                if cancel.load(Ordering::Relaxed) {
+                    return None;
+                }
+
+                // Quick 1-ping to check connectivity
+                if let Ok(output) = ping::execute_ping(&target_ip, 1, 1000).await {
+                    let results = ping::parse_ping_output(&output);
+                    if let Some(r) = results.first() {
+                        if r.status == "success" {
+                            return Some(DiscoveredLink {
+                                source: source_ip,
+                                target: target_ip,
+                                hop_count: 1,
+                                latency_ms: Some(r.latency_ms),
+                            });
+                        }
                     }
                 }
+                None
+            }));
+        }
+
+        // Collect results from concurrent pairwise pings
+        for ping_handle in ping_handles {
+            if let Some(link) = ping_handle.await.unwrap_or(None) {
+                link_set.insert((link.source.clone(), link.target.clone()));
+                links.push(link);
             }
         }
     }

@@ -97,11 +97,24 @@ interface ChartPoint {
   latency: number;
 }
 
-const chartLines = computed(() => {
+interface ChartLine {
+  target: string;
+  color: string;
+  path: string;
+  points: ChartPoint[];
+}
+
+interface ChartData {
+  lines: ChartLine[];
+  yLabels: { y: number; label: string }[];
+}
+
+const chartData = computed(() => {
   const groups = groupedPingData.value;
   const targets = Object.keys(groups);
-  if (targets.length === 0) return [];
+  if (targets.length === 0) return { lines: [], yLabels: [] } satisfies ChartData;
 
+  // Single pass: collect all points and compute ranges
   const allPoints: { target: string; latency: number; time: number }[] = [];
   for (const t of targets) {
     for (const p of groups[t]) {
@@ -109,7 +122,7 @@ const chartLines = computed(() => {
     }
   }
 
-  if (allPoints.length === 0) return [];
+  if (allPoints.length === 0) return { lines: [], yLabels: [] } satisfies ChartData;
 
   const minTime = Math.min(...allPoints.map((p) => p.time));
   const maxTime = Math.max(...allPoints.map(p => p.time));
@@ -119,8 +132,8 @@ const chartLines = computed(() => {
   const maxLat = Math.max(...latencies);
   const latRange = Math.max(maxLat - minLat, 1);
 
-  const result: { target: string; color: string; path: string; points: ChartPoint[] }[] = [];
-
+  // Build chart lines
+  const lines: ChartLine[] = [];
   for (let i = 0; i < targets.length; i++) {
     const t = targets[i];
     const pts = groups[t]
@@ -139,7 +152,7 @@ const chartLines = computed(() => {
       path += ` L ${pts[j].x} ${pts[j].y}`;
     }
 
-    result.push({
+    lines.push({
       target: t,
       color: TARGET_COLORS[i % TARGET_COLORS.length],
       path,
@@ -147,28 +160,18 @@ const chartLines = computed(() => {
     });
   }
 
-  return result;
+  // Build Y-axis labels (reuses already-computed min/max range)
+  const yLabels: { y: number; label: string }[] = [];
+  for (let i = 0; i <= 4; i++) {
+    const val = maxLat - (i * latRange) / 4;
+    yLabels.push({ y: padTop + (i * chartH) / 4, label: val.toFixed(0) });
+  }
+
+  return { lines, yLabels } satisfies ChartData;
 });
 
-const yAxisLabels = computed(() => {
-  const allPoints: { target: string; latency: number }[] = [];
-  for (const t of Object.keys(groupedPingData.value)) {
-    for (const p of groupedPingData.value[t]) {
-      allPoints.push({ target: t, latency: p.latency });
-    }
-  }
-  if (allPoints.length === 0) return [];
-  const latencies = allPoints.map((p) => p.latency);
-  const minLat = Math.min(...latencies);
-  const maxLat = Math.max(...latencies);
-  const range = Math.max(maxLat - minLat, 1);
-  const labels = [];
-  for (let i = 0; i <= 4; i++) {
-    const val = maxLat - (i * range) / 4;
-    labels.push({ y: padTop + (i * chartH) / 4, label: val.toFixed(0) });
-  }
-  return labels;
-});
+const chartLines = computed(() => chartData.value.lines);
+const yAxisLabels = computed(() => chartData.value.yLabels);
 
 // ─── Port Scan Heatmap ──────────────────────────────────────────
 
@@ -188,9 +191,16 @@ const heatmapPorts = computed(() => {
   return Array.from(ports).sort((a, b) => a - b).slice(0, 30);
 });
 
+const portStateMap = computed(() => {
+  const map = new Map<string, string>();
+  for (const p of portData.value) {
+    map.set(`${p.target}:${p.port}`, p.state);
+  }
+  return map;
+});
+
 function portState(target: string, port: number): string {
-  const entry = portData.value.find((p) => p.target === target && p.port === port);
-  return entry?.state || "unknown";
+  return portStateMap.value.get(`${target}:${port}`) || "unknown";
 }
 
 // ─── Monitor Sparkline Data (from SQLite backend) ──────────────

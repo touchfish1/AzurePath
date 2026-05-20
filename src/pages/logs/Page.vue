@@ -1,12 +1,16 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from "vue";
+import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { getLogs, clearLogs, type LogEntry } from "@/lib/tauri";
 import { ScrollText, Trash2, Search, RotateCw } from "lucide-vue-next";
+import { useDebounceFn } from "@vueuse/core";
 
 const logs = ref<LogEntry[]>([]);
 const autoRefresh = ref(true);
 const levelFilter = ref("All");
 const searchQuery = ref("");
+const debouncedSearchQuery = ref("");
+const searchDebounced = useDebounceFn((v: string) => { debouncedSearchQuery.value = v; }, 250);
+watch(searchQuery, (v) => searchDebounced(v));
 let intervalId: ReturnType<typeof setInterval> | null = null;
 
 const levels = ["All", "ERROR", "WARN", "INFO", "DEBUG", "TRACE"];
@@ -32,8 +36,8 @@ const filteredLogs = computed(() => {
   if (levelFilter.value !== "All") {
     result = result.filter((log) => log.level === levelFilter.value);
   }
-  if (searchQuery.value.trim()) {
-    const q = searchQuery.value.toLowerCase();
+  if (debouncedSearchQuery.value.trim()) {
+    const q = debouncedSearchQuery.value.toLowerCase();
     result = result.filter(
       (log) =>
         log.message.toLowerCase().includes(q) ||

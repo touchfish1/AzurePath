@@ -3,12 +3,13 @@ use crate::core::clipboard::ClipboardStore;
 use crate::core::settings::AppSettings;
 use crate::core::utils::home_dir;
 
-fn get_export_dir() -> Result<std::path::PathBuf, String> {
+async fn get_export_dir() -> Result<std::path::PathBuf, String> {
     let dir = home_dir()
         .ok_or_else(|| "Cannot find home directory".to_string())?
         .join("AzurePath")
         .join("exports");
-    std::fs::create_dir_all(&dir)
+    tokio::fs::create_dir_all(&dir)
+        .await
         .map_err(|e| format!("Failed to create exports directory: {}", e))?;
     Ok(dir)
 }
@@ -19,7 +20,7 @@ pub async fn export_chat(format: String) -> Result<String, String> {
     let messages = store
         .get_messages(None, 10000)
         .map_err(|e| format!("Failed to get messages: {}", e))?;
-    let export_dir = get_export_dir()?;
+    let export_dir = get_export_dir().await?;
     let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
 
     match format.to_lowercase().as_str() {
@@ -27,7 +28,7 @@ pub async fn export_chat(format: String) -> Result<String, String> {
             let content = serde_json::to_string_pretty(&messages)
                 .map_err(|e| format!("Failed to serialize: {}", e))?;
             let file_path = export_dir.join(format!("chat_{}.json", timestamp));
-            std::fs::write(&file_path, content)
+            tokio::fs::write(&file_path, content).await
                 .map_err(|e| format!("Failed to write file: {}", e))?;
             Ok(file_path.to_string_lossy().to_string())
         }
@@ -42,7 +43,8 @@ pub async fn export_chat(format: String) -> Result<String, String> {
                 ));
             }
             let file_path = export_dir.join(format!("chat_{}.txt", timestamp));
-            std::fs::write(&file_path, content)
+            tokio::fs::write(&file_path, content)
+                .await
                 .map_err(|e| format!("Failed to write file: {}", e))?;
             Ok(file_path.to_string_lossy().to_string())
         }
@@ -56,7 +58,7 @@ pub async fn export_clipboard(format: String) -> Result<String, String> {
     let entries = store
         .list(None, 10000)
         .map_err(|e| format!("Failed to get clipboard entries: {}", e))?;
-    let export_dir = get_export_dir()?;
+    let export_dir = get_export_dir().await?;
     let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
 
     match format.to_lowercase().as_str() {
@@ -64,7 +66,8 @@ pub async fn export_clipboard(format: String) -> Result<String, String> {
             let content = serde_json::to_string_pretty(&entries)
                 .map_err(|e| format!("Failed to serialize: {}", e))?;
             let file_path = export_dir.join(format!("clipboard_{}.json", timestamp));
-            std::fs::write(&file_path, content)
+            tokio::fs::write(&file_path, content)
+                .await
                 .map_err(|e| format!("Failed to write file: {}", e))?;
             Ok(file_path.to_string_lossy().to_string())
         }
@@ -86,7 +89,8 @@ pub async fn export_clipboard(format: String) -> Result<String, String> {
                 content.push_str(&format!("Created: {}\n\n", entry.created_at));
             }
             let file_path = export_dir.join(format!("clipboard_{}.txt", timestamp));
-            std::fs::write(&file_path, content)
+            tokio::fs::write(&file_path, content)
+                .await
                 .map_err(|e| format!("Failed to write file: {}", e))?;
             Ok(file_path.to_string_lossy().to_string())
         }
@@ -97,13 +101,14 @@ pub async fn export_clipboard(format: String) -> Result<String, String> {
 #[tauri::command]
 pub async fn export_settings() -> Result<String, String> {
     let settings = AppSettings::load()?;
-    let export_dir = get_export_dir()?;
+    let export_dir = get_export_dir().await?;
     let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
 
     let content = serde_json::to_string_pretty(&settings)
         .map_err(|e| format!("Failed to serialize settings: {}", e))?;
     let file_path = export_dir.join(format!("settings_{}.json", timestamp));
-    std::fs::write(&file_path, &content)
+    tokio::fs::write(&file_path, &content)
+        .await
         .map_err(|e| format!("Failed to write file: {}", e))?;
     Ok(file_path.to_string_lossy().to_string())
 }
@@ -136,9 +141,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_get_export_dir() {
-        let dir = get_export_dir();
+    #[tokio::test]
+    async fn test_get_export_dir() {
+        let dir = get_export_dir().await;
         assert!(dir.is_ok());
         let path = dir.unwrap();
         assert!(path.to_string_lossy().contains("AzurePath"));

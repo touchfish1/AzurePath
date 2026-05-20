@@ -197,8 +197,9 @@ pub async fn file_send(
     let svc = FILE_SVC.get().ok_or("File transfer not initialized")?;
 
     // Validate the file path (prevent path traversal and ensure file is accessible)
-    let file_path = validate_file_path(&path)?;
-    let metadata = std::fs::metadata(&file_path)
+    let file_path = validate_file_path(&path).await?;
+    let metadata = tokio::fs::metadata(&file_path)
+        .await
         .map_err(|e| format!("Cannot read file: {}", e))?;
     let file_size = metadata.len();
     let filename = file_path
@@ -415,8 +416,9 @@ pub async fn get_file_download_url(file_id: String) -> Result<String, String> {
 pub async fn file_broadcast(path: String) -> Result<FileSendResult, String> {
     let svc = FILE_SVC.get().ok_or("File transfer not initialized")?;
 
-    let file_path = validate_file_path(&path)?;
-    let metadata = std::fs::metadata(&file_path)
+    let file_path = validate_file_path(&path).await?;
+    let metadata = tokio::fs::metadata(&file_path)
+        .await
         .map_err(|e| format!("Cannot read file: {}", e))?;
     let file_size = metadata.len();
     let filename = file_path
@@ -464,7 +466,7 @@ pub async fn file_broadcast(path: String) -> Result<FileSendResult, String> {
 /// - The file does not exist
 /// - The path is not a regular file
 /// - The file is not readable
-fn validate_file_path(path: &str) -> Result<PathBuf, String> {
+async fn validate_file_path(path: &str) -> Result<PathBuf, String> {
     let file_path = PathBuf::from(path);
 
     // Check file exists
@@ -473,14 +475,16 @@ fn validate_file_path(path: &str) -> Result<PathBuf, String> {
     }
 
     // Check it's a regular file (not a directory, pipe, etc.)
-    let metadata = std::fs::metadata(&file_path)
+    let metadata = tokio::fs::metadata(&file_path)
+        .await
         .map_err(|_| "Cannot access file metadata".to_string())?;
     if !metadata.is_file() {
         return Err("Path is not a regular file".to_string());
     }
 
     // Try to canonicalize to detect path traversal attempts
-    let canonical = std::fs::canonicalize(&file_path)
+    let canonical = tokio::fs::canonicalize(&file_path)
+        .await
         .map_err(|_| "Cannot resolve file path".to_string())?;
 
     // Verify the canonical path exists and is a file (extra safety)
@@ -494,44 +498,39 @@ fn validate_file_path(path: &str) -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
 
-    #[test]
-    fn test_validate_file_path_rejects_nonexistent() {
-        let result = validate_file_path("C:\\nonexistent_file_xyz123.tmp");
+    #[tokio::test]
+    async fn test_validate_file_path_rejects_nonexistent() {
+        let result = validate_file_path("C:\\nonexistent_file_xyz123.tmp").await;
         assert!(result.is_err());
         assert!(result.err().unwrap().contains("not found"));
     }
 
-    #[test]
-    fn test_validate_file_path_rejects_directory() {
-        let result = validate_file_path(".");
+    #[tokio::test]
+    async fn test_validate_file_path_rejects_directory() {
+        let result = validate_file_path(".").await;
         assert!(result.is_err());
     }
 
-    #[test]
-    fn test_validate_file_path_accepts_valid_file() {
+    #[tokio::test]
+    async fn test_validate_file_path_accepts_valid_file() {
         // Create a temp file
         let dir = std::env::temp_dir();
         let temp_path = dir.join("azurepath_test_valid.txt");
-        let mut f = std::fs::File::create(&temp_path).unwrap();
-        f.write_all(b"test").unwrap();
-        drop(f);
+        tokio::fs::write(&temp_path, b"test").await.unwrap();
 
-        let result = validate_file_path(temp_path.to_str().unwrap());
+        let result = validate_file_path(temp_path.to_str().unwrap()).await;
         assert!(result.is_ok());
 
         // Cleanup
-        let _ = std::fs::remove_file(&temp_path);
+        let _ = tokio::fs::remove_file(&temp_path).await;
     }
 
-    #[test]
-    fn test_validate_file_path_canonicalizes() {
+    #[tokio::test]
+    async fn test_validate_file_path_canonicalizes() {
         let dir = std::env::temp_dir();
         let temp_path = dir.join("azurepath_test_canon.txt");
-        let mut f = std::fs::File::create(&temp_path).unwrap();
-        f.write_all(b"test").unwrap();
-        drop(f);
+        tokio::fs::write(&temp_path, b"test").await.unwrap();
 
         // Use a relative path with .. components
         let relative_path = format!(
@@ -539,13 +538,13 @@ mod tests {
             dir.to_str().unwrap(),
             dir.file_name().unwrap().to_str().unwrap()
         );
-        let result = validate_file_path(&relative_path);
+        let result = validate_file_path(&relative_path).await;
         assert!(result.is_ok());
         if let Ok(canonical) = result {
             // Should resolve to the actual file path
             assert!(canonical.to_string_lossy().ends_with("azurepath_test_canon.txt"));
         }
 
-        let _ = std::fs::remove_file(&temp_path);
+        let _ = tokio::fs::remove_file(&temp_path).await;
     }
 }
