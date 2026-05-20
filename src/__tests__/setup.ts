@@ -15,3 +15,11 @@ Object.defineProperty(window, "matchMedia", {
 
 // Polyfill scrollIntoView for jsdom (not implemented)
 Element.prototype.scrollIntoView = vi.fn();
+
+// Polyfill ResizeObserver for @vueuse/core's useVirtualList / useElementSize
+class MockResizeObserver {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+window.ResizeObserver = MockResizeObserver as unknown as typeof ResizeObserver;

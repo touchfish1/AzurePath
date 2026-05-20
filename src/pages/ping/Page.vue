@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, watch, ref, nextTick } from "vue";
+import { onMounted, onUnmounted, watch, ref } from "vue";
 import { Play, Square, Radio, Copy } from "lucide-vue-next";
 import Button from "@/components/ui/button/Button.vue";
 import BookmarkButton from "@/components/BookmarkButton.vue";
 import PresetDropdown from "@/components/preset/PresetDropdown.vue";
 import ReportButton from "@/components/ReportButton.vue";
+import { pingStart, pingStop, onPingProgress, onPingComplete, onPingError } from "@/lib/tauri";
+import type { UnlistenFn } from "@tauri-apps/api/event";
 import { usePingStore } from "@/stores/ping";
 import type { PingResultItem } from "@/stores/ping";
 import { usePresetStore } from "@/stores/preset";
@@ -61,6 +63,8 @@ const checkedTargets = ref<Set<string>>(new Set());
 const batchRunning = ref(false);
 const currentBatchIdx = ref(-1);
 const batchAllResults = ref<PingResultItem[]>([]);
+const activeBatchTaskIds = ref(new Set<string>());
+const batchCompletedCount = ref(0);
 
 watch(selectedGroupId, async (id) => {
   if (id) {
@@ -85,50 +89,83 @@ function toggleTarget(target: string) {
   checkedTargets.value = next;
 }
 
-function waitForPingIdle(): Promise<void> {
-  return new Promise((resolve) => {
-    if (!store.running) {
-      resolve();
-      return;
-    }
-    const stop = watch(
-      () => store.running,
-      (val) => {
-        if (!val) {
-          stop();
-          resolve();
-        }
-      },
-    );
-  });
-}
-
 async function startBatch() {
   const targets = Array.from(checkedTargets.value);
   if (targets.length === 0) return;
 
   batchRunning.value = true;
   batchAllResults.value = [];
+  batchCompletedCount.value = 0;
   store.reset();
+  store.detachListeners(); // Detach store listeners to avoid interference
 
-  for (let i = 0; i < targets.length; i++) {
-    if (!batchRunning.value) break;
-    currentBatchIdx.value = i;
-    store.target = targets[i];
+  const CONCURRENCY = 5;
+  const batchUnlisteners: UnlistenFn[] = [];
 
-    // Start ping for this target
-    await store.start();
-    await nextTick();
-    await waitForPingIdle();
+  try {
+    // Set up shared progress listener for all batch tasks
+    batchUnlisteners.push(
+      await onPingProgress((payload) => {
+        batchAllResults.value.push({
+          seq: payload.seq,
+          ttl: payload.ttl,
+          latencyMs: payload.latency_ms,
+          status: payload.status,
+        });
+      })
+    );
 
-    // Accumulate results
-    batchAllResults.value.push(...store.results);
+    // Process targets in chunks with limited concurrency
+    for (let i = 0; i < targets.length; i += CONCURRENCY) {
+      if (!batchRunning.value) break;
+
+      const chunk = targets.slice(i, i + CONCURRENCY);
+      currentBatchIdx.value = i;
+
+      // Start all pings in this chunk concurrently
+      const taskIds = await Promise.all(
+        chunk.map((target) =>
+          pingStart(target, {
+            count: store.count,
+            intervalMs: 1000,
+            timeoutMs: store.timeout,
+            payloadSize: 56,
+          })
+        )
+      );
+
+      // Track task IDs for potential stop
+      for (const tid of taskIds) {
+        activeBatchTaskIds.value.add(tid);
+      }
+
+      // Wait for all tasks in this chunk to complete
+      const remaining = new Set(taskIds);
+      await new Promise<void>((resolve) => {
+        const onEvent = (payload: { task_id: string }) => {
+          if (remaining.has(payload.task_id)) {
+            remaining.delete(payload.task_id);
+            activeBatchTaskIds.value.delete(payload.task_id);
+            batchCompletedCount.value++;
+            if (remaining.size === 0) {
+              resolve();
+            }
+          }
+        };
+        onPingComplete(onEvent).then((fn) => batchUnlisteners.push(fn));
+        onPingError(onEvent).then((fn) => batchUnlisteners.push(fn));
+      });
+    }
+  } finally {
+    // Clean up all batch listeners
+    for (const fn of batchUnlisteners) {
+      fn();
+    }
+    store.results = batchAllResults.value;
+    batchRunning.value = false;
+    currentBatchIdx.value = -1;
+    activeBatchTaskIds.value.clear();
   }
-
-  // Show accumulated results
-  store.results = batchAllResults.value;
-  batchRunning.value = false;
-  currentBatchIdx.value = -1;
 }
 
 function handleStart() {
@@ -141,7 +178,17 @@ function handleStart() {
 
 function handleStop() {
   batchRunning.value = false;
-  store.stop();
+  // Stop all running batch tasks
+  for (const tid of activeBatchTaskIds.value) {
+    pingStop(tid).catch(() => {});
+  }
+  activeBatchTaskIds.value.clear();
+  // Also stop any store-level task (single-target mode)
+  if (store.currentTaskId) {
+    store.stop();
+  } else {
+    store.detachListeners();
+  }
 }
 
 function loadPreset(preset: Preset) {
@@ -348,8 +395,8 @@ watch(
       v-if="batchRunning"
       class="rounded-xl border border-bamboo/20 bg-bamboo/5 px-4 py-3 text-sm text-bamboo"
     >
-      批量测试中：{{ currentBatchIdx + 1 }} / {{ checkedTargets.size }}
-      （当前：{{ Array.from(checkedTargets)[currentBatchIdx] || "---" }}）
+      批量测试中：{{ batchCompletedCount }} / {{ checkedTargets.size }}
+      已完成，正在处理 {{ checkedTargets.size - batchCompletedCount }} 个
     </div>
 
     <!-- Error banner -->

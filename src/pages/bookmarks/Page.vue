@@ -141,7 +141,7 @@ onMounted(async () => {
       class="text-xs text-ink-faint text-center"
     >
       共 {{ store.bookmarks.length }} 个书签
-      <template v-if="searchQuery">（筛选后 {{ filteredBookmarks.length }} 个）</template>
+      <template v-if="debouncedSearchQuery">（筛选后 {{ filteredBookmarks.length }} 个）</template>
     </div>
   </div>
 </template>

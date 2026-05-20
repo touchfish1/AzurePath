@@ -89,41 +89,50 @@ describe("BookmarksPage", () => {
   });
 
   it("filters bookmarks by search query (label match)", async () => {
+    vi.useFakeTimers();
     mockListBookmarks.mockResolvedValue(sampleBookmarks);
     const wrapper = mount(BookmarksPage);
     await flushAsync();
 
     const searchInput = wrapper.find('input[placeholder="搜索书签..."]');
     await searchInput.setValue("Google");
+    vi.advanceTimersByTime(300);
     await nextTick();
 
     expect(wrapper.text()).toContain("Google DNS");
     expect(wrapper.text()).not.toContain("Cloudflare DNS");
+    vi.useRealTimers();
   });
 
   it("filters bookmarks by search query (target match)", async () => {
+    vi.useFakeTimers();
     mockListBookmarks.mockResolvedValue(sampleBookmarks);
     const wrapper = mount(BookmarksPage);
     await flushAsync();
 
     const searchInput = wrapper.find('input[placeholder="搜索书签..."]');
     await searchInput.setValue("1.1.1.1");
+    vi.advanceTimersByTime(300);
     await nextTick();
 
     expect(wrapper.text()).toContain("Cloudflare DNS");
     expect(wrapper.text()).not.toContain("Google DNS");
+    vi.useRealTimers();
   });
 
   it("shows filtered count when searching", async () => {
+    vi.useFakeTimers();
     mockListBookmarks.mockResolvedValue(sampleBookmarks);
     const wrapper = mount(BookmarksPage);
     await flushAsync();
 
     const searchInput = wrapper.find('input[placeholder="搜索书签..."]');
     await searchInput.setValue("Google");
+    vi.advanceTimersByTime(300);
     await nextTick();
 
     expect(wrapper.text()).toContain("筛选后");
+    vi.useRealTimers();
   });
 
   it("delete button calls store.remove", async () => {

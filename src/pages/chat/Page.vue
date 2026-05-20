@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from "vue";
+import { useVirtualList } from "@vueuse/core";
 import { Send, MessageSquare, Wifi, WifiOff, Paperclip, FileUp, Download, XCircle, X, History, Search, Trash2, Calendar, Menu, X as XIcon } from "lucide-vue-next";
 import Button from "@/components/ui/button/Button.vue";
 import { useToastStore } from "@/stores/toast";
@@ -87,6 +88,23 @@ const canSendFile = computed(() =>
 
 const canSendText = computed(() =>
   !sending.value && inputText.value.trim().length > 0
+);
+
+// Virtual list for chat messages + file transfers
+const chatItems = computed(() => {
+  const items: Array<{ type: 'message'; data: StoredMessage } | { type: 'transfer'; data: FileTransfer }> = [];
+  for (const msg of filteredMessages.value) {
+    items.push({ type: 'message', data: msg });
+  }
+  for (const t of peerTransfers.value) {
+    items.push({ type: 'transfer', data: t });
+  }
+  return items;
+});
+
+const { list: virtualItems, containerProps, wrapperProps } = useVirtualList(
+  chatItems,
+  { itemHeight: 80, overscan: 10 }
 );
 
 // ─── History Management ──────────────────────────────────────
@@ -484,102 +502,92 @@ async function copyDownloadUrl(t: FileTransfer) {
 
       <!-- Main chat area -->
       <div class="flex flex-1 flex-col">
-        <!-- Messages -->
-        <div class="flex-1 overflow-y-auto p-4 space-y-3">
-          <!-- Empty state -->
-          <div v-if="filteredMessages.length === 0 && peerTransfers.length === 0" class="flex items-center justify-center h-full text-sm text-ink-faint">
-            <div class="text-center">
-              <MessageSquare class="mx-auto h-8 w-8 mb-2 opacity-40" />
-              <p>{{ selectedPeerId === '*' ? '暂无广播消息' : '暂无与该设备的聊天记录' }}</p>
-              <p v-if="selectedPeerId !== '*'" class="mt-1 text-xs opacity-60">可发送文字消息或文件</p>
-            </div>
+        <!-- Messages with virtual list -->
+        <div v-if="chatItems.length === 0" class="flex items-center justify-center h-full text-sm text-ink-faint p-4">
+          <div class="text-center">
+            <MessageSquare class="mx-auto h-8 w-8 mb-2 opacity-40" />
+            <p>{{ selectedPeerId === '*' ? '暂无广播消息' : '暂无与该设备的聊天记录' }}</p>
+            <p v-if="selectedPeerId !== '*'" class="mt-1 text-xs opacity-60">可发送文字消息或文件</p>
           </div>
-
-          <!-- Text messages -->
-          <div
-            v-for="msg in filteredMessages"
-            :key="msg.id"
-            class="flex"
-            :class="msg.is_incoming ? 'justify-start' : 'justify-end'"
-          >
+        </div>
+        <div v-else v-bind="containerProps" class="flex-1 overflow-y-auto p-4">
+          <div v-bind="wrapperProps" class="space-y-3">
             <div
-              class="max-w-[70%] rounded-xl px-4 py-2.5 text-sm"
-              :class="
-                msg.is_incoming
+              v-for="{ data: item } in virtualItems"
+              :key="item.type === 'message' ? 'msg-' + item.data.id : 'file-' + item.data.id"
+              class="flex"
+              :class="item.type === 'message' ? (item.data.is_incoming ? 'justify-start' : 'justify-end') : (item.data.is_incoming ? 'justify-start' : 'justify-end')"
+            >
+              <!-- Text message -->
+              <div v-if="item.type === 'message'"
+                class="max-w-[70%] rounded-xl px-4 py-2.5 text-sm"
+                :class="item.data.is_incoming
                   ? 'bg-paper-deep/30 text-ink rounded-bl-none'
                   : 'bg-bamboo/10 text-ink rounded-br-none'
-              "
-            >
-              <div class="flex items-center gap-2 mb-1">
-                <span class="text-xs font-medium text-ink-soft">
-                  {{ msg.is_incoming ? msg.peer_name : "我" }}
-                </span>
-                <span class="text-xs text-ink-faint">{{ msg.peer_ip }}</span>
-                <span class="text-xs text-ink-faint">{{ formatTime(msg.created_at) }}</span>
+                "
+              >
+                <div class="flex items-center gap-2 mb-1">
+                  <span class="text-xs font-medium text-ink-soft">
+                    {{ item.data.is_incoming ? item.data.peer_name : "我" }}
+                  </span>
+                  <span class="text-xs text-ink-faint">{{ item.data.peer_ip }}</span>
+                  <span class="text-xs text-ink-faint">{{ formatTime(item.data.created_at) }}</span>
+                </div>
+                <p class="whitespace-pre-wrap break-words">{{ item.data.content }}</p>
+                <div v-if="item.data.is_broadcast" class="mt-1">
+                  <span class="inline-block rounded-full px-2 py-0.5 text-xs bg-bamboo/20 text-bamboo">广播</span>
+                </div>
               </div>
-              <p class="whitespace-pre-wrap break-words">{{ msg.content }}</p>
-              <div v-if="msg.is_broadcast" class="mt-1">
-                <span class="inline-block rounded-full px-2 py-0.5 text-xs bg-bamboo/20 text-bamboo">广播</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- File transfer entries inline -->
-          <div
-            v-for="t in peerTransfers"
-            :key="'file-' + t.id"
-            class="flex"
-            :class="t.is_incoming ? 'justify-start' : 'justify-end'"
-          >
-            <div
-              class="max-w-[70%] rounded-xl px-4 py-3 text-sm border"
-              :class="
-                t.is_incoming
+              <!-- File transfer -->
+              <div v-else
+                class="max-w-[70%] rounded-xl px-4 py-3 text-sm border"
+                :class="item.data.is_incoming
                   ? 'bg-paper-deep/20 text-ink rounded-bl-none border-paper-deep/20'
                   : 'bg-bamboo/5 text-ink rounded-br-none border-bamboo/10'
-              "
-            >
-              <div class="flex items-center gap-2 mb-1.5">
-                <FileUp class="h-4 w-4 text-ink-faint" />
-                <span class="text-xs font-medium text-ink-soft">
-                  {{ t.is_incoming ? "接收文件" : "发送文件" }}
-                </span>
-              </div>
-              <p class="font-medium text-sm">{{ t.filename }}</p>
-              <div class="flex items-center gap-2 mt-1.5">
-                <span
-                  class="inline-block rounded-full px-2 py-0.5 text-xs font-medium"
-                  :class="statusClass(t.status)"
-                >
-                  {{ t.status === 'completed' ? '已完成' : t.status === 'transferring' ? '传输中' : t.status === 'broadcasting' ? '广播中' : t.status === 'sending' ? '发送中' : t.status.includes('error') ? '失败' : '等待接收' }}
-                </span>
-                <span class="text-xs text-ink-faint">
-                  {{ formatSize(t.received) }} / {{ formatSize(t.size) }}
-                </span>
-              </div>
-              <div v-if="t.status === 'transferring' && t.size > 0" class="mt-2">
-                <div class="flex items-center gap-2 text-xs text-ink-faint mb-1">
-                  <span>{{ formatSize(t.received) }} / {{ formatSize(t.size) }}</span>
-                  <span>({{ progressPercent(t.received, t.size) }}%)</span>
+                "
+              >
+                <div class="flex items-center gap-2 mb-1.5">
+                  <FileUp class="h-4 w-4 text-ink-faint" />
+                  <span class="text-xs font-medium text-ink-soft">
+                    {{ item.data.is_incoming ? "接收文件" : "发送文件" }}
+                  </span>
                 </div>
-                <div class="h-2 rounded-full bg-stone-100 dark:bg-stone-700 overflow-hidden">
-                  <div
-                    class="h-full rounded-full bg-bamboo transition-all duration-300"
-                    :style="{ width: progressPercent(t.received, t.size) + '%' }"
-                  />
+                <p class="font-medium text-sm">{{ item.data.filename }}</p>
+                <div class="flex items-center gap-2 mt-1.5">
+                  <span
+                    class="inline-block rounded-full px-2 py-0.5 text-xs font-medium"
+                    :class="statusClass(item.data.status)"
+                  >
+                    {{ item.data.status === 'completed' ? '已完成' : item.data.status === 'transferring' ? '传输中' : item.data.status === 'broadcasting' ? '广播中' : item.data.status === 'sending' ? '发送中' : item.data.status.includes('error') ? '失败' : '等待接收' }}
+                  </span>
+                  <span class="text-xs text-ink-faint">
+                    {{ formatSize(item.data.received) }} / {{ formatSize(item.data.size) }}
+                  </span>
                 </div>
-              </div>
-              <div class="mt-1 text-xs text-ink-faint">
-                {{ formatTime(t.created_at) }}
-              </div>
-              <div v-if="t.download_url" class="mt-2">
-                <button
-                  :id="'copy-btn-' + t.id"
-                  class="inline-flex items-center gap-1 rounded-md bg-bamboo/10 px-2.5 py-1 text-xs font-medium text-bamboo transition-colors hover:bg-bamboo/20"
-                  @click="copyDownloadUrl(t)"
-                >
-                  复制下载链接
-                </button>
+                <div v-if="item.data.status === 'transferring' && item.data.size > 0" class="mt-2">
+                  <div class="flex items-center gap-2 text-xs text-ink-faint mb-1">
+                    <span>{{ formatSize(item.data.received) }} / {{ formatSize(item.data.size) }}</span>
+                    <span>({{ progressPercent(item.data.received, item.data.size) }}%)</span>
+                  </div>
+                  <div class="h-2 rounded-full bg-stone-100 dark:bg-stone-700 overflow-hidden">
+                    <div
+                      class="h-full rounded-full bg-bamboo transition-all duration-300"
+                      :style="{ width: progressPercent(item.data.received, item.data.size) + '%' }"
+                    />
+                  </div>
+                </div>
+                <div class="mt-1 text-xs text-ink-faint">
+                  {{ formatTime(item.data.created_at) }}
+                </div>
+                <div v-if="item.data.download_url" class="mt-2">
+                  <button
+                    :id="'copy-btn-' + item.data.id"
+                    class="inline-flex items-center gap-1 rounded-md bg-bamboo/10 px-2.5 py-1 text-xs font-medium text-bamboo transition-colors hover:bg-bamboo/20"
+                    @click="copyDownloadUrl(item.data)"
+                  >
+                    复制下载链接
+                  </button>
+                </div>
               </div>
             </div>
           </div>
