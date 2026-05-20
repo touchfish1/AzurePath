@@ -1,15 +1,9 @@
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::LazyLock;
-use std::sync::Mutex;
 use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
+use crate::core::cancel::CANCEL_REGISTRY;
 use crate::core::traceroute;
 use crate::types::traceroute::{TraceComplete, TraceHop, TraceOptions};
-
-static CANCEL_TOKENS: LazyLock<Mutex<HashMap<String, AtomicBool>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Decode process output bytes to UTF-8, handling system locale encoding (e.g. GBK on Chinese Windows).
 fn decode_line(bytes: &[u8]) -> String {
@@ -31,10 +25,7 @@ pub async fn traceroute_start(
     let task_id = Uuid::new_v4().to_string();
 
     // Register cancel token
-    {
-        let mut tokens = CANCEL_TOKENS.lock().map_err(|e| e.to_string())?;
-        tokens.insert(task_id.clone(), AtomicBool::new(false));
-    }
+    CANCEL_REGISTRY.register(&task_id);
 
     let task_id_clone = task_id.clone();
     let app_clone = app.clone();
@@ -48,9 +39,7 @@ pub async fn traceroute_start(
             }));
         }
 
-        let _ = CANCEL_TOKENS.lock().map(|mut tokens| {
-            tokens.remove(&task_id_clone);
-        });
+        CANCEL_REGISTRY.unregister(&task_id_clone);
     });
 
     Ok(task_id)
@@ -107,16 +96,12 @@ async fn run_traceroute(
 
     loop {
         // Check cancellation periodically (every 8 lines) to avoid
-        // acquiring the Mutex on every single iteration.
+        // acquiring the RwLock on every single iteration.
         cancel_check_counter += 1;
         if cancel_check_counter >= 8 {
             cancel_check_counter = 0;
-            if let Ok(tokens) = CANCEL_TOKENS.lock() {
-                if let Some(cancel) = tokens.get(task_id) {
-                    if cancel.load(Ordering::SeqCst) {
-                        return Ok(());
-                    }
-                }
+            if CANCEL_REGISTRY.is_cancelled(task_id) {
+                return Ok(());
             }
         }
 
@@ -206,9 +191,7 @@ pub async fn traceroute_stop(
     task_id: String,
 ) -> Result<(), String> {
     let _ = app;
-    let mut tokens = CANCEL_TOKENS.lock().map_err(|e| e.to_string())?;
-    if let Some(cancel) = tokens.get_mut(&task_id) {
-        cancel.store(true, Ordering::SeqCst);
+    if CANCEL_REGISTRY.cancel(&task_id) {
         Ok(())
     } else {
         Err(format!("Task {} not found", task_id))
@@ -218,6 +201,7 @@ pub async fn traceroute_stop(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::cancel::CANCEL_REGISTRY;
 
     // -----------------------------------------------------------------------
     // decode_line — encoding fallback logic
@@ -337,68 +321,46 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // CANCEL_TOKENS — cancellation infrastructure
+    // CancelRegistry — cancellation infrastructure
     // -----------------------------------------------------------------------
 
     #[test]
-    fn test_cancel_token_insert_and_check() {
+    fn test_cancel_register_and_check() {
         let task_id = Uuid::new_v4().to_string();
 
         // Register token (as traceroute_start does)
-        CANCEL_TOKENS
-            .lock()
-            .unwrap()
-            .insert(task_id.clone(), AtomicBool::new(false));
+        CANCEL_REGISTRY.register(&task_id);
 
         // Verify token exists and is not cancelled
-        let tokens = CANCEL_TOKENS.lock().unwrap();
-        let token = tokens.get(&task_id).expect("Token should exist");
-        assert!(
-            !token.load(Ordering::SeqCst),
-            "New token should not be cancelled"
-        );
+        assert!(!CANCEL_REGISTRY.is_cancelled(&task_id));
 
         // Cleanup
-        drop(tokens);
-        CANCEL_TOKENS.lock().unwrap().remove(&task_id);
+        CANCEL_REGISTRY.unregister(&task_id);
     }
 
     #[test]
-    fn test_cancel_token_cancel_operation() {
+    fn test_cancel_cancel_operation() {
         let task_id = Uuid::new_v4().to_string();
 
         // Register
-        CANCEL_TOKENS
-            .lock()
-            .unwrap()
-            .insert(task_id.clone(), AtomicBool::new(false));
+        CANCEL_REGISTRY.register(&task_id);
 
         // Cancel (same logic as traceroute_stop)
-        {
-            let mut tokens = CANCEL_TOKENS.lock().unwrap();
-            let cancel = tokens.get_mut(&task_id).expect("Token should exist");
-            cancel.store(true, Ordering::SeqCst);
-        }
+        assert!(CANCEL_REGISTRY.cancel(&task_id));
 
         // Verify cancellation is detected
-        let tokens = CANCEL_TOKENS.lock().unwrap();
-        assert!(
-            tokens.get(&task_id).unwrap().load(Ordering::SeqCst),
-            "Cancelled token should report true"
-        );
+        assert!(CANCEL_REGISTRY.is_cancelled(&task_id));
 
         // Cleanup
-        drop(tokens);
-        CANCEL_TOKENS.lock().unwrap().remove(&task_id);
+        CANCEL_REGISTRY.unregister(&task_id);
     }
 
     #[test]
     fn test_cancel_non_existent_task() {
         let task_id = "non-existent-task".to_string();
-        let mut tokens = CANCEL_TOKENS.lock().unwrap();
         assert!(
-            tokens.get_mut(&task_id).is_none(),
-            "Non-existent task should not have a cancel token"
+            !CANCEL_REGISTRY.cancel(&task_id),
+            "Non-existent task should return false"
         );
     }
 
@@ -407,96 +369,62 @@ mod tests {
         let task_id = Uuid::new_v4().to_string();
 
         // Register
-        CANCEL_TOKENS
-            .lock()
-            .unwrap()
-            .insert(task_id.clone(), AtomicBool::new(false));
+        CANCEL_REGISTRY.register(&task_id);
 
         // Verify exists
-        assert!(CANCEL_TOKENS.lock().unwrap().contains_key(&task_id));
+        assert!(CANCEL_REGISTRY.contains(&task_id));
 
         // Cleanup (as traceroute_start's spawn block does after completion)
-        CANCEL_TOKENS.lock().unwrap().remove(&task_id);
+        CANCEL_REGISTRY.unregister(&task_id);
 
         // Verify removed
-        assert!(!CANCEL_TOKENS.lock().unwrap().contains_key(&task_id));
+        assert!(!CANCEL_REGISTRY.contains(&task_id));
     }
 
     #[test]
-    fn test_cancel_token_multiple_tasks() {
+    fn test_cancel_multiple_tasks() {
         let id1 = Uuid::new_v4().to_string();
         let id2 = Uuid::new_v4().to_string();
 
         // Register two tasks
-        CANCEL_TOKENS
-            .lock()
-            .unwrap()
-            .insert(id1.clone(), AtomicBool::new(false));
-        CANCEL_TOKENS
-            .lock()
-            .unwrap()
-            .insert(id2.clone(), AtomicBool::new(false));
+        CANCEL_REGISTRY.register(&id1);
+        CANCEL_REGISTRY.register(&id2);
 
         // Cancel only one
-        CANCEL_TOKENS
-            .lock()
-            .unwrap()
-            .get_mut(&id1)
-            .unwrap()
-            .store(true, Ordering::SeqCst);
+        assert!(CANCEL_REGISTRY.cancel(&id1));
 
         // Verify each token has the correct state
-        let tokens = CANCEL_TOKENS.lock().unwrap();
-        assert!(tokens.get(&id1).unwrap().load(Ordering::SeqCst));
-        assert!(!tokens.get(&id2).unwrap().load(Ordering::SeqCst));
+        assert!(CANCEL_REGISTRY.is_cancelled(&id1));
+        assert!(!CANCEL_REGISTRY.is_cancelled(&id2));
 
         // Cleanup
-        drop(tokens);
-        CANCEL_TOKENS.lock().unwrap().remove(&id1);
-        CANCEL_TOKENS.lock().unwrap().remove(&id2);
+        CANCEL_REGISTRY.unregister(&id1);
+        CANCEL_REGISTRY.unregister(&id2);
     }
 
     #[test]
-    fn test_cancel_token_double_cancel_is_idempotent() {
+    fn test_cancel_double_cancel_is_idempotent() {
         let task_id = Uuid::new_v4().to_string();
 
-        CANCEL_TOKENS
-            .lock()
-            .unwrap()
-            .insert(task_id.clone(), AtomicBool::new(false));
+        CANCEL_REGISTRY.register(&task_id);
 
         // Cancel twice
-        CANCEL_TOKENS
-            .lock()
-            .unwrap()
-            .get_mut(&task_id)
-            .unwrap()
-            .store(true, Ordering::SeqCst);
-        CANCEL_TOKENS
-            .lock()
-            .unwrap()
-            .get_mut(&task_id)
-            .unwrap()
-            .store(true, Ordering::SeqCst);
+        assert!(CANCEL_REGISTRY.cancel(&task_id));
+        assert!(CANCEL_REGISTRY.cancel(&task_id));
 
-        assert!(CANCEL_TOKENS
-            .lock()
-            .unwrap()
-            .get(&task_id)
-            .unwrap()
-            .load(Ordering::SeqCst));
+        assert!(CANCEL_REGISTRY.is_cancelled(&task_id));
 
-        CANCEL_TOKENS.lock().unwrap().remove(&task_id);
+        CANCEL_REGISTRY.unregister(&task_id);
     }
 
     #[test]
-    fn test_cancel_token_task_not_found_error_message() {
+    fn test_cancel_not_found_error_message() {
         let task_id = "ghost-task".to_string();
-        let mut tokens = CANCEL_TOKENS.lock().unwrap();
         // This mirrors the error path in traceroute_stop
-        let result = match tokens.get_mut(&task_id) {
-            Some(_cancel) => Ok(()),
-            None => Err(format!("Task {} not found", task_id)),
+        let result = if CANCEL_REGISTRY.cancel(&task_id) {
+            Ok(())
+        } else {
+            Err(format!("Task {} not found", task_id))
         };
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), "Task ghost-task not found");

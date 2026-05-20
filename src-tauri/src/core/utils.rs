@@ -1,4 +1,7 @@
+use serde::Serialize;
 use std::path::PathBuf;
+use tauri::Emitter;
+use tracing::warn;
 
 #[cfg(target_os = "windows")]
 use encoding_rs::GBK;
@@ -10,6 +13,15 @@ pub fn home_dir() -> Option<PathBuf> {
         .or_else(|_| std::env::var("HOME"))
         .ok()
         .map(PathBuf::from)
+}
+
+/// Emit a Tauri event, logging a warning if it fails.
+/// Use this for fire-and-forget emits inside spawned tasks where propagating
+/// the error is not practical.
+pub fn emit_or_warn<E: Serialize + Clone>(app: &tauri::AppHandle, event: &str, payload: &E) {
+    if let Err(e) = app.emit(event, payload) {
+        warn!("[emit] event '{}' failed: {}", event, e);
+    }
 }
 
 /// Decode process output bytes to a UTF-8 string.

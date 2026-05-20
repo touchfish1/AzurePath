@@ -42,7 +42,7 @@ pub async fn discovery_peers() -> Result<Vec<crate::types::discovery::PeerInfo>,
 }
 
 #[tauri::command]
-#[allow(dead_code)]
+#[cfg_attr(not(test), allow(dead_code))]
 pub async fn discovery_stop() -> Result<(), String> {
     if let Some(service) = DISCOVERY.get() {
         service.stop();

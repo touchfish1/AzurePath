@@ -82,6 +82,73 @@ export interface TraceErrorPayload {
   error: string;
 }
 
+// ============================================================
+// MTR (My TraceRoute) — combines traceroute + continuous ping
+// ============================================================
+
+export interface MtrOptions {
+  target: string;
+  maxHops: number;
+  intervalMs: number;
+  timeoutMs: number;
+}
+
+export interface MtrHopStats {
+  hop: number;
+  addr: string | null;
+  hostname: string | null;
+  sent: number;
+  received: number;
+  lossPercent: number;
+  minMs: number;
+  avgMs: number;
+  maxMs: number;
+  jitterMs: number;
+  lastMs: number | null;
+}
+
+export interface MtrProgressPayload {
+  target: string;
+  totalHops: number;
+  round: number;
+  hops: MtrHopStats[];
+}
+
+export interface MtrCompletePayload {
+  target: string;
+  totalRounds: number;
+  hops: MtrHopStats[];
+}
+
+export interface MtrErrorPayload {
+  task_id: string;
+  error: string;
+}
+
+export function mtrStart(options: MtrOptions): Promise<string> {
+  return invoke<string>("mtr_start", { options });
+}
+
+export function mtrStop(taskId: string): Promise<void> {
+  return invoke<void>("mtr_stop", { taskId });
+}
+
+export function onMtrProgress(cb: (payload: MtrProgressPayload) => void): Promise<UnlistenFn> {
+  return listen<MtrProgressPayload>("mtr:progress", (event) => cb(event.payload));
+}
+
+export function onMtrComplete(cb: (payload: MtrCompletePayload) => void): Promise<UnlistenFn> {
+  return listen<MtrCompletePayload>("mtr:complete", (event) => cb(event.payload));
+}
+
+export function onMtrError(cb: (payload: MtrErrorPayload) => void): Promise<UnlistenFn> {
+  return listen<MtrErrorPayload>("mtr:error", (event) => cb(event.payload));
+}
+
+// ============================================================
+// Phase 2 — LAN Discovery + Chat + File Transfer
+// ============================================================
+
 export interface PortErrorPayload {
   task_id: string;
   error: string;
@@ -1049,4 +1116,42 @@ export function saveTargetGroup(
 
 export function deleteTargetGroup(id: string): Promise<void> {
   return invoke<void>("delete_target_group", { id });
+}
+
+// ============================================================
+// Subnet Calculator
+// ============================================================
+
+export interface IpClassification {
+  isPrivate: boolean;
+  isLoopback: boolean;
+  isLinkLocal: boolean;
+  isMulticast: boolean;
+  isPublic: boolean;
+  description: string;
+}
+
+export interface SubnetResult {
+  networkAddress: string;
+  broadcastAddress: string;
+  subnetMask: string;
+  wildcardMask: string;
+  usableHosts: number;
+  ipRange: string;
+  cidr: number;
+  ipVersion: string;
+  classification: IpClassification;
+}
+
+export interface SubnetSplitResult {
+  subnets: SubnetResult[];
+  totalUsable: number;
+}
+
+export function calculateSubnet(address: string, cidr: number): Promise<SubnetResult> {
+  return invoke<SubnetResult>("calculate_subnet", { address, cidr });
+}
+
+export function splitSubnet(network: string, targetPrefix: number): Promise<SubnetSplitResult> {
+  return invoke<SubnetSplitResult>("split_subnet", { network, targetPrefix });
 }

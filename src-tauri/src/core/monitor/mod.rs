@@ -4,7 +4,7 @@ use rusqlite::Connection;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
-use tauri::Emitter;
+use crate::core::utils::emit_or_warn;
 
 // ──────────────────────────────────────────────
 // Database store
@@ -256,13 +256,10 @@ pub fn start_monitoring(app: tauri::AppHandle) -> Result<(), String> {
     MONITOR_ACTIVE.store(true, Ordering::Relaxed);
 
     // Emit initial status
-    let _ = app.emit(
-        "monitor:status",
-        crate::types::monitor::MonitorStatusPayload {
-            running: true,
-            target_count: targets.len(),
-        },
-    );
+    emit_or_warn(&app, "monitor:status", &crate::types::monitor::MonitorStatusPayload {
+        running: true,
+        target_count: targets.len(),
+    });
 
     for target in targets {
         let cancel = cancel.clone();
@@ -363,7 +360,7 @@ async fn ping_target_and_report(
                 sent: stats.sent,
                 received: stats.received,
             };
-            let _ = app.emit("monitor:update", &payload);
+            emit_or_warn(app, "monitor:update", &payload);
         }
         Err(e) => {
             let timestamp = chrono::Utc::now().to_rfc3339();
@@ -381,7 +378,7 @@ async fn ping_target_and_report(
                 sent: 3,
                 received: 0,
             };
-            let _ = app.emit("monitor:update", &payload);
+            emit_or_warn(app, "monitor:update", &payload);
             // Still store the failure
             let _ = store.insert_record(target_id, target_host, &timestamp, None, 1.0);
             tracing::warn!("Monitor ping failed for {}: {}", target_host, e);

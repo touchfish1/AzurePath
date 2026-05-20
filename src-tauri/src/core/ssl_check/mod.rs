@@ -195,7 +195,6 @@ fn extract_date(der: &[u8], _marker: u8) -> Option<String> {
 }
 
 /// Check if a certificate is likely self-signed by comparing issuer/subject bytes.
-#[allow(dead_code)]
 fn is_likely_self_signed(cert_der: &[u8]) -> bool {
     // Count occurrences of common name patterns - if issuer and subject
     // have the same organization, it's likely self-signed

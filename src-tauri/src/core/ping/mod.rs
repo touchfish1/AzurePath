@@ -11,7 +11,7 @@ pub(crate) fn decode_ping_output(bytes: &[u8]) -> String {
 
 #[derive(Debug, Clone)]
 pub struct PingResult {
-    #[allow(dead_code)]
+    #[cfg_attr(not(test), allow(dead_code))]
     pub seq: u32,
     pub latency_ms: f64,
     pub ttl: u32,
@@ -29,7 +29,6 @@ pub struct PingStats {
 }
 
 /// Execute the system ping command and return raw stdout.
-#[allow(dead_code)]
 pub async fn execute_ping(
     target: &str,
     count: u32,
@@ -73,7 +72,6 @@ pub async fn execute_ping(
 }
 
 /// Parse ping output into individual PingResult entries.
-#[allow(dead_code)]
 pub fn parse_ping_output(output: &str) -> Vec<PingResult> {
     let mut results = Vec::new();
 

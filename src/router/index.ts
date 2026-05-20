@@ -18,6 +18,11 @@ const routes: RouteRecordRaw[] = [
     component: () => import("@/pages/traceroute/Page.vue"),
   },
   {
+    path: "/mtr",
+    name: "mtr",
+    component: () => import("@/pages/mtr/index.vue"),
+  },
+  {
     path: "/port-scan",
     name: "port-scan",
     component: () => import("@/pages/port-scan/Page.vue"),

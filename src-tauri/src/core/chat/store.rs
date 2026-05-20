@@ -219,7 +219,7 @@ impl ChatStore {
         Ok(())
     }
 
-    #[allow(dead_code)]
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn upsert_peer(&self, peer: &PeerInfo) -> Result<(), String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         conn.execute(
@@ -244,7 +244,7 @@ impl ChatStore {
         Ok(())
     }
 
-    #[allow(dead_code)]
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn get_peers(&self) -> Result<Vec<PeerInfo>, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn

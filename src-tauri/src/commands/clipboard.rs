@@ -5,7 +5,8 @@ use crate::core::utils::home_dir;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use tauri::AppHandle;
-use tauri::Emitter;
+
+use crate::core::utils::emit_or_warn;
 use tauri::image::Image;
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tracing::{info, warn};
@@ -13,12 +14,12 @@ use tracing::{info, warn};
 static CLIPBOARD_STORE: OnceLock<Arc<ClipboardStore>> = OnceLock::new();
 static CLIPBOARD_MONITOR: OnceLock<ClipboardMonitor> = OnceLock::new();
 
-#[allow(dead_code)]
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn clipboard_store() -> Option<&'static Arc<ClipboardStore>> {
     CLIPBOARD_STORE.get()
 }
 
-#[allow(dead_code)]
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn clipboard_monitor() -> Option<&'static ClipboardMonitor> {
     CLIPBOARD_MONITOR.get()
 }
@@ -234,7 +235,7 @@ pub(crate) async fn handle_frame(incoming: &crate::core::connection::IncomingFra
                 warn!("[clipboard] Failed to save synced entry: {}", e);
             }
         }
-        let _ = app.emit("clipboard:synced", entries);
+        emit_or_warn(app, "clipboard:synced", entries);
     }
 }
 

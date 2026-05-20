@@ -15,6 +15,8 @@ import {
 } from "lucide-vue-next";
 import Button from "@/components/ui/button/Button.vue";
 import QRCode from "qrcode";
+import { calculateSubnet as tauriCalculateSubnet, splitSubnet as tauriSplitSubnet } from "@/lib/tauri";
+import type { SubnetResult, SubnetSplitResult } from "@/lib/tauri";
 
 // ─── Tab System ───────────────────────────────────────────────
 type ToolTab = "subnet" | "base64" | "url" | "hash" | "port" | "wifi" | "json" | "jwt" | "timestamp";
@@ -40,62 +42,80 @@ const tabs: ToolTabDef[] = [
 const activeTab = ref<ToolTab>("subnet");
 
 // ─── 1. Subnet Calculator ────────────────────────────────────
+const subnetIpVersion = ref<"IPv4" | "IPv6">("IPv4");
 const subnetIp = ref("192.168.1.0");
 const subnetCidr = ref(24);
 const subnetResult = ref<SubnetResult | null>(null);
 const subnetError = ref("");
 
-interface SubnetResult {
-  networkAddress: string;
-  broadcastAddress: string;
-  subnetMask: string;
-  usableHosts: number;
-  ipRange: string;
-  cidr: number;
+// Subnet splitting
+const subnetSplitOpen = ref(false);
+const subnetTargetPrefix = ref(26);
+const subnetSplitResult = ref<SubnetSplitResult | null>(null);
+const subnetSplitError = ref("");
+
+const cidrMax = computed(() => (subnetIpVersion.value === "IPv4" ? 32 : 128));
+const cidrHint = computed(() =>
+  subnetIpVersion.value === "IPv4" ? "(0-32)" : "(0-128)"
+);
+
+const classificationBadgeClass = computed(() => {
+  const c = subnetResult.value?.classification;
+  if (!c) return "";
+  if (c.isPrivate) return "bg-amber/10 text-amber ring-1 ring-amber/30";
+  if (c.isLoopback) return "bg-blue/10 text-blue ring-1 ring-blue/30";
+  if (c.isLinkLocal) return "bg-cyan/10 text-cyan ring-1 ring-cyan/30";
+  if (c.isMulticast) return "bg-purple/10 text-purple ring-1 ring-purple/30";
+  if (c.isPublic) return "bg-emerald/10 text-emerald ring-1 ring-emerald/30";
+  return "bg-gray/10 text-gray ring-1 ring-gray/30";
+});
+
+function formatUsableHosts(hosts: number): string {
+  if (hosts > Number.MAX_SAFE_INTEGER) return "大量";
+  return hosts.toLocaleString();
 }
 
-function parseIp(ip: string): number | null {
-  const parts = ip.split(".").map(Number);
-  if (parts.length !== 4 || parts.some((p) => isNaN(p) || p < 0 || p > 255)) return null;
-  return ((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) >>> 0;
-}
-
-function ipToString(ip: number): string {
-  return `${(ip >>> 24) & 0xff}.${(ip >>> 16) & 0xff}.${(ip >>> 8) & 0xff}.${ip & 0xff}`;
-}
-
-function calculateSubnet() {
+async function doCalculateSubnet() {
   subnetError.value = "";
   subnetResult.value = null;
+  subnetSplitResult.value = null;
 
   const cidr = subnetCidr.value;
-  if (cidr < 0 || cidr > 32) {
-    subnetError.value = "CIDR 必须介于 0 和 32 之间";
+  if (cidr < 0 || cidr > (subnetIpVersion.value === "IPv4" ? 32 : 128)) {
+    subnetError.value = `CIDR 必须介于 0 和 ${subnetIpVersion.value === "IPv4" ? 32 : 128} 之间`;
     return;
   }
 
-  const ipNum = parseIp(subnetIp.value);
-  if (ipNum === null) {
-    subnetError.value = "无效的 IP 地址格式";
+  try {
+    const result = await tauriCalculateSubnet(subnetIp.value, cidr);
+    subnetResult.value = result;
+  } catch (e) {
+    subnetError.value = String(e);
+  }
+}
+
+async function doSplitSubnet() {
+  subnetSplitError.value = "";
+  subnetSplitResult.value = null;
+
+  if (!subnetResult.value) {
+    subnetSplitError.value = "请先计算子网";
     return;
   }
 
-  const mask = cidr === 0 ? 0 : (~0 << (32 - cidr)) >>> 0;
-  const network = (ipNum & mask) >>> 0;
-  const broadcast = cidr === 32 ? ipNum : (network | ~mask) >>> 0;
-  const hosts = cidr >= 31 ? 0 : Math.pow(2, 32 - cidr) - 2;
+  const target = subnetTargetPrefix.value;
+  if (target <= subnetCidr.value) {
+    subnetSplitError.value = "目标前缀必须大于当前前缀";
+    return;
+  }
 
-  const firstHost = cidr >= 31 ? network : network + 1;
-  const lastHost = cidr >= 31 ? broadcast : broadcast - 1;
-
-  subnetResult.value = {
-    networkAddress: ipToString(network),
-    broadcastAddress: ipToString(broadcast),
-    subnetMask: ipToString(mask),
-    usableHosts: hosts,
-    ipRange: `${ipToString(firstHost)} — ${ipToString(lastHost)}`,
-    cidr,
-  };
+  try {
+    const networkStr = `${subnetResult.value.networkAddress}/${subnetResult.value.cidr}`;
+    const result = await tauriSplitSubnet(networkStr, target);
+    subnetSplitResult.value = result;
+  } catch (e) {
+    subnetSplitError.value = String(e);
+  }
 }
 
 // ─── 2. Base64 ───────────────────────────────────────────────
@@ -765,32 +785,50 @@ function convertTimestamp() {
       <!-- Subnet Calculator -->
       <div v-if="activeTab === 'subnet'" class="max-w-xl">
         <h3 class="text-lg font-display font-bold text-ink">子网计算器</h3>
-        <p class="mt-1 text-sm text-ink-faint">输入 IP 地址和 CIDR 前缀长度，计算子网信息。</p>
+        <p class="mt-1 text-sm text-ink-faint">输入 IP 地址和 CIDR 前缀长度，计算子网信息。支持 IPv4/IPv6。</p>
 
         <div class="mt-5 space-y-4">
+          <!-- IP Version Toggle -->
+          <div class="flex w-fit rounded-lg border border-paper-deep/30 bg-paper-warm/30 p-1">
+            <button
+              class="rounded-md px-4 py-1.5 text-sm font-medium transition-colors"
+              :class="subnetIpVersion === 'IPv4' ? 'bg-bamboo/15 text-bamboo' : 'text-ink-soft hover:text-ink'"
+              @click="subnetIpVersion = 'IPv4'"
+            >
+              IPv4
+            </button>
+            <button
+              class="rounded-md px-4 py-1.5 text-sm font-medium transition-colors"
+              :class="subnetIpVersion === 'IPv6' ? 'bg-bamboo/15 text-bamboo' : 'text-ink-soft hover:text-ink'"
+              @click="subnetIpVersion = 'IPv6'"
+            >
+              IPv6
+            </button>
+          </div>
+
           <div>
             <label class="mb-1.5 block text-xs font-medium text-ink-soft">IP 地址</label>
             <input
               v-model="subnetIp"
               type="text"
-              placeholder="如 192.168.1.0"
+              :placeholder="subnetIpVersion === 'IPv4' ? '如 192.168.1.0' : '如 2001:db8::'"
               class="w-full rounded-lg border border-paper-deep/40 bg-paper-warm/50 px-3 py-2 text-sm text-ink outline-none transition-colors placeholder:text-ink-faint/40 focus:border-bamboo/40 focus:bg-paper-warm/80"
             />
           </div>
           <div>
             <label class="mb-1.5 block text-xs font-medium text-ink-soft">
               CIDR 前缀长度
-              <span class="ml-1 text-ink-faint">(0-32)</span>
+              <span class="ml-1 text-ink-faint">{{ cidrHint }}</span>
             </label>
             <input
               v-model.number="subnetCidr"
               type="number"
-              min="0"
-              max="32"
+              :min="0"
+              :max="cidrMax"
               class="w-full rounded-lg border border-paper-deep/40 bg-paper-warm/50 px-3 py-2 text-sm text-ink outline-none transition-colors placeholder:text-ink-faint/40 focus:border-bamboo/40 focus:bg-paper-warm/80"
             />
           </div>
-          <Button @click="calculateSubnet">计算</Button>
+          <Button @click="doCalculateSubnet">计算</Button>
 
           <p v-if="subnetError" class="text-sm text-red-500">{{ subnetError }}</p>
 
@@ -798,6 +836,17 @@ function convertTimestamp() {
             v-if="subnetResult"
             class="mt-4 space-y-3 rounded-xl border border-paper-deep/20 bg-paper-warm/30 p-5"
           >
+            <!-- Classification badge -->
+            <div class="mb-3 flex items-center gap-2">
+              <span class="text-xs font-medium text-ink-soft">分类：</span>
+              <span
+                :class="classificationBadgeClass"
+                class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium"
+              >
+                {{ subnetResult.classification.description }}
+              </span>
+            </div>
+
             <div class="flex items-center justify-between border-b border-paper-deep/10 pb-2">
               <span class="text-xs font-medium text-ink-soft">网络地址</span>
               <span class="text-sm font-mono text-ink">{{ subnetResult.networkAddress }}/{{ subnetResult.cidr }}</span>
@@ -806,17 +855,84 @@ function convertTimestamp() {
               <span class="text-xs font-medium text-ink-soft">子网掩码</span>
               <span class="text-sm font-mono text-ink">{{ subnetResult.subnetMask }}</span>
             </div>
-            <div class="flex items-center justify-between">
+            <div v-if="subnetResult.broadcastAddress" class="flex items-center justify-between">
               <span class="text-xs font-medium text-ink-soft">广播地址</span>
               <span class="text-sm font-mono text-ink">{{ subnetResult.broadcastAddress }}</span>
             </div>
             <div class="flex items-center justify-between">
+              <span class="text-xs font-medium text-ink-soft">通配符掩码</span>
+              <span class="text-sm font-mono text-ink">{{ subnetResult.wildcardMask }}</span>
+            </div>
+            <div class="flex items-center justify-between">
               <span class="text-xs font-medium text-ink-soft">可用主机数</span>
-              <span class="text-sm font-mono text-ink">{{ subnetResult.usableHosts.toLocaleString() }}</span>
+              <span class="text-sm font-mono text-ink">{{ formatUsableHosts(subnetResult.usableHosts) }}</span>
             </div>
             <div class="flex items-center justify-between">
               <span class="text-xs font-medium text-ink-soft">IP 范围</span>
-              <span class="text-sm font-mono text-ink">{{ subnetResult.ipRange }}</span>
+              <span class="text-sm font-mono text-ink break-all">{{ subnetResult.ipRange }}</span>
+            </div>
+          </div>
+
+          <!-- Subnet Splitting Panel -->
+          <div v-if="subnetResult" class="mt-6 border-t border-paper-deep/20 pt-4">
+            <button
+              class="flex items-center gap-2 text-sm font-medium text-ink-soft hover:text-ink transition-colors"
+              @click="subnetSplitOpen = !subnetSplitOpen"
+            >
+              <span
+                class="text-xs transition-transform"
+                :class="subnetSplitOpen ? 'rotate-90' : ''"
+              >▶</span>
+              子网划分
+            </button>
+
+            <div v-if="subnetSplitOpen" class="mt-3 space-y-4">
+              <div>
+                <label class="mb-1.5 block text-xs font-medium text-ink-soft">
+                  目标前缀长度
+                </label>
+                <input
+                  v-model.number="subnetTargetPrefix"
+                  type="number"
+                  :min="subnetCidr + 1"
+                  :max="cidrMax"
+                  class="w-full rounded-lg border border-paper-deep/40 bg-paper-warm/50 px-3 py-2 text-sm text-ink outline-none transition-colors placeholder:text-ink-faint/40 focus:border-bamboo/40 focus:bg-paper-warm/80"
+                />
+              </div>
+              <Button variant="outline" @click="doSplitSubnet">划分子网</Button>
+
+              <p v-if="subnetSplitError" class="text-sm text-red-500">{{ subnetSplitError }}</p>
+
+              <div v-if="subnetSplitResult" class="space-y-3">
+                <div class="text-sm text-ink-soft">
+                  共 {{ subnetSplitResult.subnets.length }} 个子网，
+                  总计 {{ formatUsableHosts(subnetSplitResult.totalUsable) }} 个可用地址
+                </div>
+                <div class="overflow-x-auto rounded-xl border border-paper-deep/20">
+                  <table class="w-full text-sm">
+                    <thead>
+                      <tr class="bg-paper-deep/10 text-ink-soft text-xs uppercase tracking-wider">
+                        <th class="px-3 py-2 text-left">子网</th>
+                        <th class="px-3 py-2 text-left">掩码</th>
+                        <th class="px-3 py-2 text-left">可用主机数</th>
+                        <th class="px-3 py-2 text-left">IP 范围</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr
+                        v-for="(sub, idx) in subnetSplitResult.subnets"
+                        :key="idx"
+                        class="border-t border-paper-deep/10"
+                      >
+                        <td class="px-3 py-2 font-mono text-ink">{{ sub.networkAddress }}/{{ sub.cidr }}</td>
+                        <td class="px-3 py-2 font-mono text-ink">{{ sub.subnetMask }}</td>
+                        <td class="px-3 py-2 font-mono text-ink">{{ formatUsableHosts(sub.usableHosts) }}</td>
+                        <td class="px-3 py-2 font-mono text-ink break-all">{{ sub.ipRange }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           </div>
         </div>

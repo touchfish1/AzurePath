@@ -1,6 +1,7 @@
 pub mod api_test;
 pub mod backup;
 pub mod bandwidth;
+pub mod subnet;
 pub mod bookmark;
 pub mod chat;
 pub mod clipboard;
@@ -16,6 +17,7 @@ pub mod logs;
 pub mod mac_lookup;
 pub mod mdns;
 pub mod monitor;
+pub mod mtr;
 pub mod network_sniffer;
 pub mod ping;
 pub mod port_scan;

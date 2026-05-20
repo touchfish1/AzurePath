@@ -1,7 +1,6 @@
 use tokio::process::Command;
 
 /// Decode process output bytes to UTF-8, handling system locale encoding (e.g. GBK on Chinese Windows).
-#[allow(dead_code)]
 fn decode_output(bytes: &[u8]) -> String {
     crate::core::utils::decode_output(bytes)
 }
@@ -15,14 +14,13 @@ pub struct ExecuteTraceResult {
 }
 
 #[derive(Debug, Clone, Default)]
-#[allow(dead_code)]
+#[cfg_attr(not(test), allow(dead_code))]
 pub struct TraceStats {
     pub hops_completed: u32,
     pub destinations_reached: bool,
 }
 
 /// Execute the system traceroute/tracert command and return raw stdout.
-#[allow(dead_code)]
 pub async fn execute_traceroute(
     target: &str,
     max_hops: u32,
@@ -67,7 +65,6 @@ pub async fn execute_traceroute(
 }
 
 /// Parse traceroute/tracert output into structured hop results.
-#[allow(dead_code)]
 pub fn parse_traceroute_output(output: &str) -> Vec<ExecuteTraceResult> {
     let mut results = Vec::new();
 
@@ -162,7 +159,6 @@ pub fn parse_tracert_line(line: &str) -> Option<ExecuteTraceResult> {
 }
 
 /// Parse Windows tracert output using the single-line parser.
-#[allow(dead_code)]
 fn parse_windows_tracert_output(output: &str, results: &mut Vec<ExecuteTraceResult>) {
     for line in output.lines() {
         if let Some(result) = parse_tracert_line(line) {
@@ -172,12 +168,7 @@ fn parse_windows_tracert_output(output: &str, results: &mut Vec<ExecuteTraceResu
 }
 
 /// Parse Unix traceroute output.
-/// Unix traceroute format:
-///  1  192.168.1.1 (192.168.1.1)  0.542 ms  0.489 ms  0.476 ms
-///  2  * * *
-///  3  8.8.8.8 (8.8.8.8)  11.234 ms  12.567 ms  11.890 ms
-///  4  router.local (10.0.0.1)  5.123 ms  4.987 ms  5.234 ms
-#[allow(dead_code)]
+#[cfg_attr(not(test), allow(dead_code))]
 fn parse_unix_traceroute_output(output: &str, results: &mut Vec<ExecuteTraceResult>) {
     for line in output.lines() {
         let line = line.trim();
@@ -271,7 +262,7 @@ fn parse_unix_traceroute_output(output: &str, results: &mut Vec<ExecuteTraceResu
 }
 
 /// Compute trace statistics.
-#[allow(dead_code)]
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn compute_trace_stats(results: &[ExecuteTraceResult]) -> TraceStats {
     let hops_completed = results.len() as u32;
     let destinations_reached = results

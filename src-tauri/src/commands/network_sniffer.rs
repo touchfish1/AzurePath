@@ -1,4 +1,6 @@
+use crate::core::cancel::CANCEL_REGISTRY;
 use crate::core::network_sniffer::{discovery, fingerprint, os_detect, port_scanner};
+use crate::core::utils::emit_or_warn;
 use crate::types::network_sniffer::{
     DeviceResult, PortPreset, PortResult, SnifferOptions, SnifferProgress,
 };
@@ -7,50 +9,30 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
 use tokio::sync::Semaphore;
 use tracing::warn;
 use uuid::Uuid;
 
 static SCAN_RESULTS: LazyLock<Mutex<HashMap<String, Vec<DeviceResult>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
-static CANCEL_TOKENS: LazyLock<Mutex<HashMap<String, Arc<AtomicBool>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Parse a CIDR notation string or a single IP into a list of IP addresses.
 fn parse_cidr(cidr: &str) -> Result<Vec<IpAddr>, String> {
-    let (base, prefix_len) = match cidr.split_once('/') {
-        Some((ip, len)) => {
-            let ip: IpAddr = ip.parse().map_err(|e| format!("Invalid IP: {}", e))?;
-            let len: u8 = len.parse().map_err(|_| "Invalid CIDR prefix".to_string())?;
-            if len > 32 {
-                return Err(format!(
-                    "Invalid CIDR prefix length {} (must be 0-32)",
-                    len
-                ));
-            }
-            (ip, len)
-        }
-        None => {
-            let ip: IpAddr = cidr.parse().map_err(|e| format!("Invalid IP: {}", e))?;
-            return Ok(vec![ip]);
-        }
-    };
+    // Single IP without CIDR: return directly
+    if !cidr.contains('/') {
+        let ip: IpAddr = cidr.parse().map_err(|e| format!("Invalid IP: {}", e))?;
+        return Ok(vec![ip]);
+    }
 
-    let ip_u32 = match base {
-        IpAddr::V4(v4) => u32::from(v4),
-        IpAddr::V6(_) => return Err("IPv6 not supported yet".to_string()),
-    };
+    let (ip_u32, prefix_len) = crate::core::subnet::parse_cidr_v4(cidr)?;
 
-    // /32: single host
     if prefix_len == 32 {
         return Ok(vec![IpAddr::V4(ip_u32.into())]);
     }
 
-    // /0: entire IPv4 space — too large, will be caught by max-range check below
     let host_bits = 32 - prefix_len;
     let mask = if host_bits >= 32 {
-        // Avoid shift overflow: shifting u32 by 32 is UB/panic in debug
         0u32
     } else {
         (!0u32) << host_bits
@@ -58,19 +40,14 @@ fn parse_cidr(cidr: &str) -> Result<Vec<IpAddr>, String> {
     let network = ip_u32 & mask;
     let broadcast = network | !mask;
 
-    // /31 per RFC 3021: both addresses are usable (no network/broadcast address)
     if prefix_len == 31 {
         return Ok(vec![
-            IpAddr::V4((network).into()),
+            IpAddr::V4(network.into()),
             IpAddr::V4(broadcast.into()),
         ]);
     }
 
     let host_count = broadcast.saturating_sub(network).saturating_sub(1);
-    if host_count > 65534 {
-        return Err("CIDR range too large (max /16)".to_string());
-    }
-
     let mut ips = Vec::with_capacity(host_count as usize);
     for i in 1..=host_count {
         if let Some(host_ip) = network.checked_add(i) {
@@ -88,9 +65,10 @@ async fn run_scan(app: AppHandle, task_id: String, options: SnifferOptions) {
         match parse_cidr(target) {
             Ok(ips) => all_ips.extend(ips),
             Err(e) => {
-                let _ = app.emit(
+                emit_or_warn(
+                    &app,
                     "sniffer:error",
-                    serde_json::json!({
+                    &serde_json::json!({
                         "taskId": task_id,
                         "error": format!("Invalid target '{}': {}", target, e),
                     }),
@@ -106,9 +84,10 @@ async fn run_scan(app: AppHandle, task_id: String, options: SnifferOptions) {
 
     let total_ips = all_ips.len();
     if total_ips == 0 {
-        let _ = app.emit(
+        emit_or_warn(
+            &app,
             "sniffer:error",
-            serde_json::json!({
+            &serde_json::json!({
                 "taskId": task_id,
                 "error": "No valid targets specified".to_string(),
             }),
@@ -119,9 +98,10 @@ async fn run_scan(app: AppHandle, task_id: String, options: SnifferOptions) {
 
     // Validate concurrency settings
     if options.concurrency_ports == 0 {
-        let _ = app.emit(
+        emit_or_warn(
+            &app,
             "sniffer:error",
-            serde_json::json!({
+            &serde_json::json!({
                 "taskId": task_id,
                 "error": "Port concurrency must be > 0".to_string(),
             }),
@@ -130,9 +110,10 @@ async fn run_scan(app: AppHandle, task_id: String, options: SnifferOptions) {
         return;
     }
     if options.concurrency_hosts == 0 {
-        let _ = app.emit(
+        emit_or_warn(
+            &app,
             "sniffer:error",
-            serde_json::json!({
+            &serde_json::json!({
                 "taskId": task_id,
                 "error": "Host concurrency must be > 0".to_string(),
             }),
@@ -151,35 +132,18 @@ async fn run_scan(app: AppHandle, task_id: String, options: SnifferOptions) {
         }
     };
 
-    // 3. Get cancel token
-    let cancel = {
-        let tokens = match CANCEL_TOKENS.lock() {
-            Ok(t) => t,
-            Err(_) => {
-                let _ = app.emit(
-                    "sniffer:error",
-                    serde_json::json!({
-                        "taskId": task_id,
-                        "error": "Internal lock error".to_string(),
-                    }),
-                );
-                return;
-            }
-        };
-        match tokens.get(&task_id).cloned() {
-            Some(c) => c,
-            None => {
-                let _ = app.emit(
-                    "sniffer:error",
-                    serde_json::json!({
-                        "taskId": task_id,
-                        "error": "Task not found".to_string(),
-                    }),
-                );
-                return;
-            }
-        }
-    };
+    // 3. Check cancel token
+    if !CANCEL_REGISTRY.contains(&task_id) {
+        emit_or_warn(
+            &app,
+            "sniffer:error",
+            &serde_json::json!({
+                "taskId": task_id,
+                "error": "Task not found".to_string(),
+            }),
+        );
+        return;
+    }
 
     // 4. Emit initial progress
     let progress = SnifferProgress {
@@ -188,7 +152,7 @@ async fn run_scan(app: AppHandle, task_id: String, options: SnifferOptions) {
         services_found: 0,
         current_target: String::new(),
     };
-    let _ = app.emit("sniffer:progress", &progress);
+    emit_or_warn(&app, "sniffer:progress", &progress);
 
     // 5. Scan loop — concurrent hosts via Semaphore
     let semaphore = Arc::new(Semaphore::new(options.concurrency_hosts as usize));
@@ -200,13 +164,13 @@ async fn run_scan(app: AppHandle, task_id: String, options: SnifferOptions) {
     let mut handles = Vec::with_capacity(all_ips.len());
 
     for ip in all_ips {
-        if cancel.load(Ordering::SeqCst) {
+        if CANCEL_REGISTRY.is_cancelled(&task_id) {
             break;
         }
 
         let sem_clone = semaphore.clone();
         let app = app.clone();
-        let cancel = cancel.clone();
+        let task_id = task_id.clone();
         let scanned = scanned.clone();
         let services_found = services_found.clone();
         let devices = devices.clone();
@@ -221,7 +185,7 @@ async fn run_scan(app: AppHandle, task_id: String, options: SnifferOptions) {
                 Err(_) => return, // semaphore closed
             };
 
-            if cancel.load(Ordering::SeqCst) {
+            if CANCEL_REGISTRY.is_cancelled(&task_id) {
                 return;
             }
 
@@ -230,7 +194,8 @@ async fn run_scan(app: AppHandle, task_id: String, options: SnifferOptions) {
             let ip_str = ip.to_string();
 
             // Emit progress
-            let _ = app.emit(
+            emit_or_warn(
+                &app,
                 "sniffer:progress",
                 &SnifferProgress {
                     total_hosts: total,
@@ -245,6 +210,7 @@ async fn run_scan(app: AppHandle, task_id: String, options: SnifferOptions) {
 
             if alive {
                 // Scan ports
+                let cancel = Arc::new(AtomicBool::new(false));
                 let scanned_ports = port_scanner::scan_ports(
                     &ip_str,
                     &ports,
@@ -261,9 +227,10 @@ async fn run_scan(app: AppHandle, task_id: String, options: SnifferOptions) {
                         let detected =
                             fingerprint::detect_service(&ip_str, pr, opts.timeout_ms).await;
 
-                        let _ = app.emit(
+                        emit_or_warn(
+                            &app,
                             "sniffer:port",
-                            serde_json::json!({
+                            &serde_json::json!({
                                 "ip": ip_str,
                                 "port": detected.port,
                                 "protocol": detected.protocol,
@@ -281,9 +248,10 @@ async fn run_scan(app: AppHandle, task_id: String, options: SnifferOptions) {
                         }
                         open_ports.push(detected);
                     } else {
-                        let _ = app.emit(
+                        emit_or_warn(
+                            &app,
                             "sniffer:port",
-                            serde_json::json!({
+                            &serde_json::json!({
                                 "ip": ip_str,
                                 "port": pr.port,
                                 "protocol": pr.protocol,
@@ -316,7 +284,7 @@ async fn run_scan(app: AppHandle, task_id: String, options: SnifferOptions) {
                     &opts.mode,
                 );
 
-                let _ = app.emit("sniffer:device", &device);
+                emit_or_warn(&app, "sniffer:device", &device);
 
                 // Collect result
                 if let Ok(mut devs) = devices.lock() {
@@ -345,9 +313,10 @@ async fn run_scan(app: AppHandle, task_id: String, options: SnifferOptions) {
         let mut results = match SCAN_RESULTS.lock() {
             Ok(r) => r,
             Err(_) => {
-                let _ = app.emit(
+                emit_or_warn(
+                    &app,
                     "sniffer:error",
-                    serde_json::json!({
+                    &serde_json::json!({
                         "taskId": task_id,
                         "error": "Internal lock error saving results".to_string(),
                     }),
@@ -367,9 +336,10 @@ async fn run_scan(app: AppHandle, task_id: String, options: SnifferOptions) {
     }
 
     // 7. Emit completion event
-    let _ = app.emit(
+    emit_or_warn(
+        &app,
         "sniffer:complete",
-        serde_json::json!({
+        &serde_json::json!({
             "taskId": task_id,
         }),
     );
@@ -380,9 +350,7 @@ async fn run_scan(app: AppHandle, task_id: String, options: SnifferOptions) {
 
 /// Remove a task's cancel token from the global map.
 fn cleanup_task(task_id: &str) {
-    if let Ok(mut tokens) = CANCEL_TOKENS.lock() {
-        tokens.remove(task_id);
-    }
+    CANCEL_REGISTRY.unregister(task_id);
 }
 
 #[tauri::command]
@@ -391,12 +359,8 @@ pub async fn sniffer_start(
     options: SnifferOptions,
 ) -> Result<String, String> {
     let task_id = Uuid::new_v4().to_string();
-    let cancel = Arc::new(AtomicBool::new(false));
 
-    {
-        let mut tokens = CANCEL_TOKENS.lock().map_err(|e| e.to_string())?;
-        tokens.insert(task_id.clone(), cancel);
-    }
+    CANCEL_REGISTRY.register(&task_id);
 
     let app_clone = app.clone();
     let task_id_clone = task_id.clone();
@@ -411,16 +375,10 @@ pub async fn sniffer_start(
 #[tauri::command]
 pub async fn sniffer_stop(app: AppHandle, task_id: String) -> Result<(), String> {
     let _ = app;
-    let cancel = {
-        let tokens = CANCEL_TOKENS.lock().map_err(|e| e.to_string())?;
-        tokens.get(&task_id).cloned()
-    };
-    match cancel {
-        Some(c) => {
-            c.store(true, Ordering::SeqCst);
-            Ok(())
-        }
-        None => Err(format!("Task {} not found", task_id)),
+    if CANCEL_REGISTRY.cancel(&task_id) {
+        Ok(())
+    } else {
+        Err(format!("Task {} not found", task_id))
     }
 }
 

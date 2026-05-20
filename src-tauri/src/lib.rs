@@ -183,15 +183,18 @@ pub fn run() {
             commands::monitor::monitor_get_all_recent_history,
             // Phase 13 — Export Data
             commands::export_data::save_file,
-            // Phase 14 — mDNS Discovery
+            // Phase 14 — MTR Route Tracing
+            commands::mtr::mtr_start,
+            commands::mtr::mtr_stop,
+            // Phase 15 — mDNS Discovery
             commands::mdns::mdns_discover,
-            // Phase 15 — Bandwidth Monitor
+            // Phase 16 — Bandwidth Monitor
             commands::bandwidth::get_interfaces,
             commands::bandwidth::start_bandwidth_monitor,
             commands::bandwidth::stop_bandwidth_monitor,
-            // Phase 16 — Report Export
+            // Phase 17 — Report Export
             commands::report::save_report,
-            // Phase 17 — Logs
+            // Phase 18 — Logs
             commands::logs::get_logs,
             commands::logs::clear_logs,
             // Phase 19 — API Test
@@ -213,6 +216,9 @@ pub fn run() {
             commands::bookmark::list_bookmarks,
             commands::bookmark::add_bookmark,
             commands::bookmark::delete_bookmark,
+            // Subnet Calculator
+            commands::subnet::calculate_subnet,
+            commands::subnet::split_subnet,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

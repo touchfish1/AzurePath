@@ -22,7 +22,7 @@ pub async fn is_host_alive(
 }
 
 /// Discover alive hosts from a list of IPs concurrently.
-#[allow(dead_code)]
+#[cfg_attr(not(test), allow(dead_code))]
 pub async fn discover_hosts(
     ips: &[IpAddr],
     concurrency: usize,

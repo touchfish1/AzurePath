@@ -1,6 +1,7 @@
 pub mod activity;
 pub mod bandwidth;
 pub mod chat;
+pub mod subnet;
 pub mod clipboard;
 pub mod discovery;
 pub mod dns;
@@ -8,6 +9,7 @@ pub mod file_transfer;
 pub mod http_check;
 pub mod mdns;
 pub mod monitor;
+pub mod mtr;
 pub mod ping;
 pub mod network_sniffer;
 pub mod port_scan;

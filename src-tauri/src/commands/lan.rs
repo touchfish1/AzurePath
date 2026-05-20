@@ -1,6 +1,8 @@
 use crate::core::connection::ConnectionManager;
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
+
+use crate::core::utils::emit_or_warn;
 use tracing::{info, warn};
 
 /// Initialize all LAN services: discovery, connection, chat, file transfer.
@@ -32,7 +34,7 @@ pub async fn lan_init(app: AppHandle) -> Result<(), String> {
     let _ = crate::commands::clipboard::clipboard_start(app.clone()).await;
 
     info!("[lan] All services initialized successfully");
-    let _ = app.emit("lan:ready", serde_json::json!({ "status": "ok" }));
+    emit_or_warn(&app, "lan:ready", &serde_json::json!({ "status": "ok" }));
 
     // 5. When new peers are discovered via discovery, connect to them via TCP
     let conn_mgr_clone = conn_mgr.clone();

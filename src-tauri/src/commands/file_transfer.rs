@@ -6,7 +6,9 @@ use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
+
+use crate::core::utils::emit_or_warn;
 use tokio::sync::oneshot;
 use tracing::info;
 use uuid::Uuid;
@@ -49,15 +51,12 @@ pub(crate) async fn handle_frame(incoming: &IncomingFrame, app: &AppHandle) {
             // Remember which peer sent this request (for routing file_accept back)
             svc.register_request_sender(file_id, &incoming.peer_id).await;
             svc.register_incoming(file_id, filename, *size, &incoming.peer_id).await;
-            let _ = app.emit(
-                "file:request",
-                serde_json::json!({
-                    "fileId": file_id,
-                    "filename": filename,
-                    "size": size,
-                    "from": incoming.peer_id,
-                }),
-            );
+            emit_or_warn(app, "file:request", &serde_json::json!({
+                "fileId": file_id,
+                "filename": filename,
+                "size": size,
+                "from": incoming.peer_id,
+            }));
         }
         crate::types::chat::Frame::FileResponse {
             file_id,
@@ -102,15 +101,12 @@ pub(crate) async fn handle_frame(incoming: &IncomingFrame, app: &AppHandle) {
             speed,
         } => {
             svc.update_progress(file_id, *received, *total).await;
-            let _ = app.emit(
-                "file:progress",
-                serde_json::json!({
-                    "fileId": file_id,
-                    "received": received,
-                    "total": total,
-                    "speed": speed,
-                }),
-            );
+            emit_or_warn(app, "file:progress", &serde_json::json!({
+                "fileId": file_id,
+                "received": received,
+                "total": total,
+                "speed": speed,
+            }));
         }
         crate::types::chat::Frame::FileComplete { file_id } => {
             let download_dir = crate::core::file_transfer::receiver::default_download_dir();
@@ -127,31 +123,22 @@ pub(crate) async fn handle_frame(incoming: &IncomingFrame, app: &AppHandle) {
                 // Update the transfer record with download URL
                 svc.set_download_url(file_id, &download_url).await;
 
-                let _ = app.emit(
-                    "file:complete",
-                    serde_json::json!({
-                        "fileId": file_id,
-                        "path": file_path_str,
-                        "downloadUrl": download_url,
-                    }),
-                );
+                emit_or_warn(app, "file:complete", &serde_json::json!({
+                    "fileId": file_id,
+                    "path": file_path_str,
+                    "downloadUrl": download_url,
+                }));
             } else {
-                let _ = app.emit(
-                    "file:complete",
-                    serde_json::json!({
-                        "fileId": file_id,
-                        "path": file_path_str,
-                    }),
-                );
+                emit_or_warn(app, "file:complete", &serde_json::json!({
+                    "fileId": file_id,
+                    "path": file_path_str,
+                }));
             }
         }
         crate::types::chat::Frame::FileAck { file_id } => {
-            let _ = app.emit(
-                "file:ack",
-                serde_json::json!({
-                    "fileId": file_id,
-                }),
-            );
+            emit_or_warn(app, "file:ack", &serde_json::json!({
+                "fileId": file_id,
+            }));
         }
         _ => {}
     }

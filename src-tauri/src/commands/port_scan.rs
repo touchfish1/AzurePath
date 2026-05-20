@@ -1,18 +1,13 @@
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::sync::LazyLock;
-use std::sync::Mutex;
 use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
+use crate::core::cancel::CANCEL_REGISTRY;
 use crate::core::port_scan;
 use crate::types::port_scan::{
     OpenPort, PortFound, PortRange, ScanComplete, ScanOptions, ScanProgress,
 };
-
-static CANCEL_TOKENS: LazyLock<Mutex<HashMap<String, Arc<AtomicBool>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 fn validate_scan_inputs(target: &str, port_range: &PortRange, opts: &ScanOptions) -> Result<(), String> {
     if target.trim().is_empty() {
@@ -46,10 +41,7 @@ pub async fn port_scan_start(
     let cancel_flag = Arc::new(AtomicBool::new(false));
 
     // Register cancel token
-    {
-        let mut tokens = CANCEL_TOKENS.lock().map_err(|e| e.to_string())?;
-        tokens.insert(task_id.clone(), cancel_flag.clone());
-    }
+    CANCEL_REGISTRY.register(&task_id);
 
     let task_id_clone = task_id.clone();
     let app_clone = app.clone();
@@ -65,9 +57,7 @@ pub async fn port_scan_start(
             }));
         }
 
-        let _ = CANCEL_TOKENS.lock().map(|mut tokens| {
-            tokens.remove(&task_id_clone);
-        });
+        CANCEL_REGISTRY.unregister(&task_id_clone);
     });
 
     Ok(task_id)
@@ -205,13 +195,7 @@ pub async fn port_scan_stop(
     task_id: String,
 ) -> Result<(), String> {
     let _ = app;
-    let cancel = {
-        let tokens = CANCEL_TOKENS.lock().map_err(|e| e.to_string())?;
-        tokens.get(&task_id).cloned()
-    };
-
-    if let Some(cancel) = cancel {
-        cancel.store(true, Ordering::SeqCst);
+    if CANCEL_REGISTRY.cancel(&task_id) {
         Ok(())
     } else {
         Err(format!("Task {} not found", task_id))

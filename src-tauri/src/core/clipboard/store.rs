@@ -232,7 +232,7 @@ impl ClipboardStore {
         }
     }
 
-    #[allow(dead_code)]
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn delete(&self, id: &str) -> Result<(), String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         conn.execute("DELETE FROM clipboard_entries WHERE id = ?1", params![id])
@@ -266,7 +266,7 @@ impl ClipboardStore {
         Ok(())
     }
 
-    #[allow(dead_code)]
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn count(&self) -> Result<u32, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let count: u32 = conn

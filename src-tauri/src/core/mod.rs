@@ -1,4 +1,6 @@
 pub mod bandwidth;
+pub mod cancel;
+pub mod subnet;
 pub mod bookmark;
 pub mod chat;
 pub mod clipboard;
@@ -13,6 +15,7 @@ pub mod log_buffer;
 pub mod mac_lookup;
 pub mod mdns;
 pub mod monitor;
+pub mod mtr;
 pub mod ping;
 pub mod network_sniffer;
 pub mod port_scan;

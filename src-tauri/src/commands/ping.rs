@@ -1,27 +1,9 @@
-use std::collections::HashMap;
-use std::sync::LazyLock;
-use std::sync::Mutex;
 use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
+use crate::core::cancel::CANCEL_REGISTRY;
 use crate::core::ping;
 use crate::types::ping::{PingComplete, PingOptions, PingProgress};
-
-static CANCEL_TOKENS: LazyLock<Mutex<HashMap<String, bool>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-/// Access CANCEL_TOKENS with automatic Mutex poisoning recovery.
-/// If the Mutex is poisoned (another thread panicked while holding the lock),
-/// we recover via `into_inner()` to keep the system functional.
-fn with_cancel_tokens<F, R>(f: F) -> R
-where
-    F: FnOnce(&mut HashMap<String, bool>) -> R,
-{
-    let mut tokens = CANCEL_TOKENS
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
-    f(&mut *tokens)
-}
 
 #[tauri::command]
 pub async fn ping_start(
@@ -33,9 +15,7 @@ pub async fn ping_start(
     let task_id = Uuid::new_v4().to_string();
 
     // Register cancel token
-    with_cancel_tokens(|tokens| {
-        tokens.insert(task_id.clone(), false);
-    });
+    CANCEL_REGISTRY.register(&task_id);
 
     let task_id_clone = task_id.clone();
     let app_clone = app.clone();
@@ -50,10 +30,8 @@ pub async fn ping_start(
             }));
         }
 
-        // Cleanup cancel token (handles Mutex poisoning gracefully)
-        with_cancel_tokens(|tokens| {
-            tokens.remove(&task_id_clone);
-        });
+        // Cleanup cancel token
+        CANCEL_REGISTRY.unregister(&task_id_clone);
     });
 
     Ok(task_id)
@@ -99,8 +77,8 @@ async fn run_ping(
     let mut ping_results: Vec<ping::PingResult> = Vec::new();
 
     loop {
-        // Check cancellation (handles Mutex poisoning gracefully)
-        if with_cancel_tokens(|tokens| tokens.get(task_id).copied().unwrap_or(false)) {
+        // Check cancellation via CancelRegistry
+        if CANCEL_REGISTRY.is_cancelled(task_id) {
             return Ok(());
         }
 
@@ -163,98 +141,65 @@ async fn run_ping(
     Ok(())
 }
 
+#[tauri::command]
+pub async fn ping_stop(task_id: String) -> Result<(), String> {
+    if CANCEL_REGISTRY.cancel(&task_id) {
+        Ok(())
+    } else {
+        Err(format!("Task {} not found", task_id))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_with_cancel_tokens_basic_insert_and_read() {
-        // Insert a token
-        with_cancel_tokens(|tokens| {
-            tokens.insert("test1".to_string(), true);
-        });
-        // Read it back
-        let val = with_cancel_tokens(|tokens| tokens.get("test1").copied().unwrap_or(false));
-        assert!(val);
+    fn test_cancel_registry_basic() {
+        let task_id = Uuid::new_v4().to_string();
+        assert!(!CANCEL_REGISTRY.is_cancelled(&task_id));
 
-        // Update it
-        with_cancel_tokens(|tokens| {
-            if let Some(v) = tokens.get_mut("test1") {
-                *v = false;
-            }
-        });
-        let val = with_cancel_tokens(|tokens| tokens.get("test1").copied().unwrap_or(true));
-        assert!(!val);
+        CANCEL_REGISTRY.register(&task_id);
+        assert!(!CANCEL_REGISTRY.is_cancelled(&task_id));
 
-        // Clean up
-        with_cancel_tokens(|tokens| {
-            tokens.remove("test1");
-        });
+        assert!(CANCEL_REGISTRY.cancel(&task_id));
+        assert!(CANCEL_REGISTRY.is_cancelled(&task_id));
+
+        CANCEL_REGISTRY.unregister(&task_id);
+        assert!(!CANCEL_REGISTRY.is_cancelled(&task_id));
     }
 
     #[test]
-    fn test_with_cancel_tokens_missing_key() {
-        let val = with_cancel_tokens(|tokens| tokens.get("nonexistent").copied().unwrap_or(false));
-        assert!(!val);
+    fn test_cancel_registry_missing_key() {
+        let task_id = Uuid::new_v4().to_string();
+        assert!(!CANCEL_REGISTRY.is_cancelled(&task_id));
+        assert!(!CANCEL_REGISTRY.cancel(&task_id));
     }
 
     #[test]
-    fn test_with_cancel_tokens_multiple_operations() {
-        with_cancel_tokens(|tokens| {
-            tokens.insert("a".to_string(), false);
-            tokens.insert("b".to_string(), true);
-            tokens.insert("c".to_string(), false);
-        });
+    fn test_cancel_registry_multiple_operations() {
+        let id_a = Uuid::new_v4().to_string();
+        let id_b = Uuid::new_v4().to_string();
 
-        let a = with_cancel_tokens(|tokens| tokens.get("a").copied().unwrap_or(true));
-        let b = with_cancel_tokens(|tokens| tokens.get("b").copied().unwrap_or(false));
-        let c = with_cancel_tokens(|tokens| tokens.get("c").copied().unwrap_or(true));
-        assert!(!a);
-        assert!(b);
-        assert!(!c);
+        CANCEL_REGISTRY.register(&id_a);
+        CANCEL_REGISTRY.register(&id_b);
 
-        with_cancel_tokens(|tokens| {
-            tokens.clear();
-        });
+        assert!(!CANCEL_REGISTRY.is_cancelled(&id_a));
+        assert!(!CANCEL_REGISTRY.is_cancelled(&id_b));
+
+        CANCEL_REGISTRY.cancel(&id_a);
+        assert!(CANCEL_REGISTRY.is_cancelled(&id_a));
+        assert!(!CANCEL_REGISTRY.is_cancelled(&id_b));
+
+        CANCEL_REGISTRY.unregister(&id_a);
+        CANCEL_REGISTRY.unregister(&id_b);
     }
 
     #[test]
-    fn test_with_cancel_tokens_poison_recovery() {
-        // Poisone the Mutex by panicking while holding the lock
-        let _ = std::panic::catch_unwind(|| {
-            let _lock = CANCEL_TOKENS.lock().unwrap();
-            panic!("intentional poison for test");
-        });
-
-        // After poisoning, with_cancel_tokens should still work via into_inner()
-        with_cancel_tokens(|tokens| {
-            tokens.insert("poison_test".to_string(), true);
-        });
-
-        let val = with_cancel_tokens(|tokens| {
-            tokens.get("poison_test").copied().unwrap_or(false)
-        });
-        assert!(val, "Poisoned mutex should still allow token operations");
-
-        // Clean up
-        with_cancel_tokens(|tokens| {
-            tokens.remove("poison_test");
-        });
-    }
-}
-
-#[tauri::command]
-pub async fn ping_stop(task_id: String) -> Result<(), String> {
-    if with_cancel_tokens(|tokens| {
-        if let Some(cancel) = tokens.get_mut(&task_id) {
-            *cancel = true;
-            true
-        } else {
-            false
-        }
-    }) {
-        Ok(())
-    } else {
-        Err(format!("Task {} not found", task_id))
+    fn test_ping_stop_non_existent() {
+        let result = ping_stop("nonexistent".to_string());
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let err = rt.block_on(result).unwrap_err();
+        assert!(err.contains("not found"));
     }
 }

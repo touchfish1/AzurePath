@@ -2,8 +2,8 @@ pub mod receiver;
 mod sender;
 
 use crate::core::connection::ConnectionManager;
+use crate::core::utils::emit_or_warn;
 use crate::types::chat::Frame;
-use tauri::Emitter;
 use crate::types::file_transfer::FileTransfer;
 pub use receiver::FileReceiver;
 pub use sender::FileSender;
@@ -165,14 +165,11 @@ impl FileTransferService {
 
                     // Emit file:complete event to frontend
                     if let Some(app) = crate::commands::file_transfer::app_handle() {
-                        let _ = app.emit(
-                            "file:complete",
-                            serde_json::json!({
-                                "fileId": tid,
-                                "path": path_str,
-                                "downloadUrl": download_url,
-                            }),
-                        );
+                        emit_or_warn(app, "file:complete", &serde_json::json!({
+                            "fileId": tid,
+                            "path": path_str,
+                            "downloadUrl": download_url,
+                        }));
                     }
                 }
 
@@ -256,7 +253,7 @@ impl FileTransferService {
     }
 
     /// Mark a transfer as errored.
-    #[allow(dead_code)]
+    #[cfg_attr(not(test), allow(dead_code))]
     pub async fn mark_error(&self, file_id: &str, error: &str) {
         let mut transfers = self.transfers.lock().await;
         if let Some(ft) = transfers.get_mut(file_id) {
@@ -306,7 +303,7 @@ impl FileTransferService {
     }
 
     /// Remove a broadcast file record after it has been processed.
-    #[allow(dead_code)]
+    #[cfg_attr(not(test), allow(dead_code))]
     pub async fn remove_broadcast(&self, file_id: &str) {
         self.broadcast_files.lock().await.remove(file_id);
     }

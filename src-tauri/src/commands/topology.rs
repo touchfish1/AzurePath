@@ -2,9 +2,10 @@ use std::collections::HashSet;
 use std::net::Ipv4Addr;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
 
 use crate::core::ping;
+use crate::core::utils::emit_or_warn;
 
 // ============================================================
 // Data types
@@ -53,7 +54,7 @@ fn set_cancel_flag(value: bool) {
     }
 }
 
-#[allow(dead_code)]
+#[cfg_attr(not(test), allow(dead_code))]
 fn is_cancelled() -> bool {
     if let Ok(guard) = CANCEL_FLAG.lock() {
         guard.as_ref().map_or(false, |f| f.load(Ordering::Relaxed))
@@ -136,10 +137,7 @@ pub async fn discover_topology(app: AppHandle, subnet: Option<String>) -> Result
     tauri::async_runtime::spawn(async move {
         let result = run_discovery(&app_clone, subnet, cancel).await;
         if let Err(e) = result {
-            let _ = app_clone.emit(
-                "topology:error",
-                serde_json::json!({ "error": e }),
-            );
+            emit_or_warn(&app_clone, "topology:error", &serde_json::json!({ "error": e }));
         }
 
         // Clean up cancel flag
@@ -201,16 +199,13 @@ async fn run_discovery(
             }
 
             let done = completed.fetch_add(1, Ordering::Relaxed) + 1;
-            let _ = app_clone.emit(
-                "topology:progress",
-                DiscoverProgress {
-                    progress: (done as f64 / total as f64) * 50.0,
-                    phase: "scan".to_string(),
-                    current_ip: ip_str.clone(),
-                    nodes_found: 0,
-                    message: format!("扫描 {} ({}/{})", ip_str, done, total),
-                },
-            );
+            emit_or_warn(&app_clone, "topology:progress", &DiscoverProgress {
+                progress: (done as f64 / total as f64) * 50.0,
+                phase: "scan".to_string(),
+                current_ip: ip_str.clone(),
+                nodes_found: 0,
+                message: format!("扫描 {} ({}/{})", ip_str, done, total),
+            });
 
             // Quick ping with 1 packet, 2s timeout
             if let Ok(output) = ping::execute_ping(&ip_str, 1, 2000).await {
@@ -294,16 +289,13 @@ async fn run_discovery(
             return Err("发现已取消".to_string());
         }
 
-        let _ = app.emit(
-            "topology:progress",
-            DiscoverProgress {
-                progress: 50.0 + (idx as f64 / total_trace as f64) * 45.0,
-                phase: "trace".to_string(),
-                current_ip: host.clone(),
-                nodes_found: alive_hosts.len() as u32,
-                message: format!("测量 {} ({}/{})", host, idx + 1, alive_hosts.len()),
-            },
-        );
+        emit_or_warn(app, "topology:progress", &DiscoverProgress {
+            progress: 50.0 + (idx as f64 / total_trace as f64) * 45.0,
+            phase: "trace".to_string(),
+            current_ip: host.clone(),
+            nodes_found: alive_hosts.len() as u32,
+            message: format!("测量 {} ({}/{})", host, idx + 1, alive_hosts.len()),
+        });
 
         // Measure latency to this host (3 pings for accuracy)
         let latency = match ping::execute_ping(host, 3, 3000).await {
@@ -386,24 +378,18 @@ async fn run_discovery(
     // ============================================================
     // Phase 3: Emit final results
     // ============================================================
-    let _ = app.emit(
-        "topology:progress",
-        DiscoverProgress {
-            progress: 100.0,
-            phase: "complete".to_string(),
-            current_ip: String::new(),
-            nodes_found: nodes.len() as u32,
-            message: format!("发现 {} 个节点, {} 条连接", nodes.len(), links.len()),
-        },
-    );
+    emit_or_warn(app, "topology:progress", &DiscoverProgress {
+        progress: 100.0,
+        phase: "complete".to_string(),
+        current_ip: String::new(),
+        nodes_found: nodes.len() as u32,
+        message: format!("发现 {} 个节点, {} 条连接", nodes.len(), links.len()),
+    });
 
-    let _ = app.emit(
-        "topology:result",
-        serde_json::json!({
-            "nodes": nodes,
-            "links": links,
-        }),
-    );
+    emit_or_warn(app, "topology:result", &serde_json::json!({
+        "nodes": nodes,
+        "links": links,
+    }));
 
     Ok(())
 }

@@ -3,7 +3,7 @@ use std::net::IpAddr;
 
 /// Analyze TTL value to guess OS.
 /// Common TTLs: Windows=128, Linux=64, macOS=64, Solaris=255, Network devices=255
-#[allow(dead_code)]
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn guess_os_by_ttl(ttl: u8) -> Option<&'static str> {
     match ttl {
         0..=64 => Some("Linux/Unix"),

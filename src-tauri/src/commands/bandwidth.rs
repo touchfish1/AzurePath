@@ -1,28 +1,10 @@
 use std::collections::HashMap;
-use std::sync::LazyLock;
-use std::sync::Mutex;
-
 use tauri::{AppHandle, Emitter};
 
 use crate::core::bandwidth;
 use crate::core::bandwidth::CounterSnapshot;
+use crate::core::cancel::CANCEL_REGISTRY;
 use crate::types::bandwidth::InterfaceInfo;
-
-static MONITOR_FLAGS: LazyLock<Mutex<HashMap<String, bool>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-fn set_monitor_flag(name: &str, value: bool) {
-    if let Ok(mut flags) = MONITOR_FLAGS.lock() {
-        flags.insert(name.to_string(), value);
-    }
-}
-
-fn get_monitor_flag(name: &str) -> bool {
-    MONITOR_FLAGS
-        .lock()
-        .map(|flags| flags.get(name).copied().unwrap_or(false))
-        .unwrap_or(false)
-}
 
 /// Get the list of available network interfaces.
 #[tauri::command]
@@ -38,11 +20,11 @@ pub fn get_interfaces() -> Result<Vec<InterfaceInfo>, String> {
 pub async fn start_bandwidth_monitor(app: AppHandle) -> Result<(), String> {
     let monitor_id = "default".to_string();
 
-    if get_monitor_flag(&monitor_id) {
+    if CANCEL_REGISTRY.contains(&monitor_id) {
         return Err("Bandwidth monitor is already running".to_string());
     }
 
-    set_monitor_flag(&monitor_id, true);
+    CANCEL_REGISTRY.register(&monitor_id);
 
     let app_clone = app.clone();
 
@@ -61,7 +43,7 @@ pub async fn start_bandwidth_monitor(app: AppHandle) -> Result<(), String> {
 
         loop {
             // Check if we should stop.
-            if !get_monitor_flag(&monitor_id) {
+            if CANCEL_REGISTRY.is_cancelled(&monitor_id) {
                 break;
             }
 
@@ -69,7 +51,7 @@ pub async fn start_bandwidth_monitor(app: AppHandle) -> Result<(), String> {
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
             // Check again after sleep.
-            if !get_monitor_flag(&monitor_id) {
+            if CANCEL_REGISTRY.is_cancelled(&monitor_id) {
                 break;
             }
 
@@ -94,7 +76,7 @@ pub async fn start_bandwidth_monitor(app: AppHandle) -> Result<(), String> {
             previous = current;
         }
 
-        set_monitor_flag(&monitor_id, false);
+        CANCEL_REGISTRY.unregister(&monitor_id);
     });
 
     Ok(())
@@ -103,6 +85,6 @@ pub async fn start_bandwidth_monitor(app: AppHandle) -> Result<(), String> {
 /// Stop the bandwidth monitor.
 #[tauri::command]
 pub async fn stop_bandwidth_monitor() -> Result<(), String> {
-    set_monitor_flag("default", false);
+    CANCEL_REGISTRY.cancel("default");
     Ok(())
 }
