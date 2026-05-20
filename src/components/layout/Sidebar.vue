@@ -66,6 +66,7 @@ const navItems: NavItem[] = [
   { label: "局域网测速", name: "speedtest", path: "/speedtest", icon: Activity },
   { label: "文件传输", name: "files", path: "/files", icon: FileUp },
   { label: "工具箱", name: "toolbox", path: "/toolbox", icon: Wrench },
+  { label: "开发者工具", name: "dev-tools", path: "/dev-tools", icon: Terminal },
   { label: "WOL 唤醒", name: "wol", path: "/wol", icon: Magnet },
   { label: "应用日志", name: "logs", path: "/logs", icon: ScrollText },
   { label: "数据备份", name: "backup", path: "/backup", icon: HardDrive },

@@ -122,6 +122,11 @@ const routes: RouteRecordRaw[] = [
     name: "backup",
     component: () => import("@/pages/backup/Page.vue"),
   },
+  {
+    path: "/dev-tools",
+    name: "dev-tools",
+    component: () => import("@/pages/dev-tools/Page.vue"),
+  },
 ];
 
 const router = createRouter({
