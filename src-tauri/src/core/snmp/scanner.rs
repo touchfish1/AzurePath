@@ -71,7 +71,7 @@ impl SnmpScanner {
                     ..config.clone()
                 };
 
-                if let Ok(session) = SnmpSession::open(&probe_config) {
+                if let Ok(mut session) = SnmpSession::open(&probe_config) {
                     let results = session.get_multiple(&[
                         oids::SYS_NAME,
                         oids::SYS_DESCR,

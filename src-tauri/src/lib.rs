@@ -40,6 +40,10 @@ pub fn run() {
             if let Err(e) = tauri::async_runtime::block_on(commands::remote_desktop::remote_desktop_init()) {
                 eprintln!("[azurepath] remote_desktop init warning: {e}");
             }
+            // Initialize snmp store
+            if let Err(e) = tauri::async_runtime::block_on(commands::snmp::snmp_init()) {
+                eprintln!("[azurepath] snmp init warning: {e}");
+            }
 
             use tauri::menu::{MenuBuilder, MenuItemBuilder};
             use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -291,6 +295,15 @@ pub fn run() {
             commands::system_info::get_local_network_info,
             // Remote Desktop Clipboard
             commands::remote_desktop::rd_push_clipboard,
+            // SNMP
+            commands::snmp::snmp_discover,
+            commands::snmp::snmp_list_devices,
+            commands::snmp::snmp_delete_device,
+            commands::snmp::snmp_get_interfaces,
+            commands::snmp::snmp_get_arp_table,
+            commands::snmp::snmp_get_history,
+            commands::snmp::snmp_start_collect,
+            commands::snmp::snmp_stop_collect,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

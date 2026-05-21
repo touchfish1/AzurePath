@@ -60,7 +60,7 @@ impl SnmpCollector {
             while *running.lock().await {
                 ticker.tick().await;
 
-                let session = match SnmpSession::open(&config) {
+                let mut session = match SnmpSession::open(&config) {
                     Ok(s) => s,
                     Err(e) => {
                         eprintln!("[azurepath] SNMP collector open error: {e}");

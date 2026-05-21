@@ -13,8 +13,7 @@ use crate::core::snmp::scanner::SnmpScanner;
 use crate::core::snmp::store::SnmpStore;
 use crate::core::snmp::SnmpSession;
 use crate::types::snmp::{
-    DiscoverProgress, SnmpArpEntry, SnmpDevice, SnmpInterface,
-    SnmpSample, SnmpSessionConfig,
+    SnmpArpEntry, SnmpDevice, SnmpInterface, SnmpSample, SnmpSessionConfig,
 };
 
 static STORE: OnceLock<Arc<SnmpStore>> = OnceLock::new();
@@ -81,7 +80,7 @@ pub async fn snmp_get_interfaces(
         community,
         timeout_ms: 3000,
     };
-    let session = SnmpSession::open(&config)?;
+    let mut session = SnmpSession::open(&config)?;
 
     let entries = session.walk(oids::IF_TABLE)?;
     let mut interfaces: HashMap<u32, SnmpInterface> = HashMap::new();
@@ -134,7 +133,7 @@ pub async fn snmp_get_arp_table(
         community,
         timeout_ms: 3000,
     };
-    let session = SnmpSession::open(&config)?;
+    let mut session = SnmpSession::open(&config)?;
     let entries = session.walk("1.3.6.1.2.1.4.22.1")?;
 
     let mut arp_entries: HashMap<String, (String, String)> = HashMap::new();
