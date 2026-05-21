@@ -1,0 +1,64 @@
+<h2>数据流与前端页面</h2>
+
+<div class="section">
+  <h3>数据流</h3>
+  <div class="mockup" style="max-width: 600px;">
+    <div class="mockup-header">SNMP 数据流</div>
+    <div class="mockup-body" style="padding: 16px;">
+<pre style="text-align: left; font-family: monospace; font-size: 13px; line-height: 1.6; white-space: pre-wrap;">
+┌──────────┐   UDP:161    ┌──────────────┐
+│ SNMP设备  │◄──────────► │ SnmpSession  │
+│(交换机/   │  get/walk   │ (OID 查询)    │
+│ 路由器)   │             │              │
+└──────────┘             └──────┬───────┘
+                                │
+                    ┌───────────┴───────────┐
+                    │    Scanner / Collector │
+                    │   (发现 + 定时采集)     │
+                    └───────────┬───────────┘
+                                │
+                    ┌───────────┴───────────┐
+                    │   SQLite (历史数据)    │
+                    │   Event (实时推送)     │
+                    └───────────────────────┘
+</pre>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>前端页面</h3>
+  <div class="split">
+    <div class="mockup" style="flex: 1;">
+      <div class="mockup-header">发现页 snmp/Page.vue</div>
+      <div class="mockup-body" style="padding: 16px; min-height: 180px;">
+        <div style="display: flex; gap: 4px; margin-bottom: 12px;">
+          <input class="mock-input" placeholder="目标 IP / CIDR" style="flex: 1;">
+          <input class="mock-input" placeholder="Community" style="width: 100px;">
+        </div>
+        <button class="mock-button">扫描</button>
+        <div style="margin-top: 12px; border: 1px dashed; padding: 8px;">
+          <div class="mock-nav" style="justify-content: flex-start; gap: 4px; font-size: 11px;">
+            <span>▪ 192.168.1.1 (Huawei S5700)</span>
+            <span>▪ 192.168.1.2 (Hikvision NVR)</span>
+            <span>▪ 192.168.1.10 (HP LaserJet)</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="mockup" style="flex: 1;">
+      <div class="mockup-header">设备详情页</div>
+      <div class="mockup-body" style="padding: 16px; min-height: 180px;">
+        <div style="margin: 0 0 12px;">
+          <b>192.168.1.1</b> — Huawei S5700
+        </div>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <span class="mock-tag" style="padding: 2px 8px; border: 1px solid; font-size: 11px;">接口(24)</span>
+          <span class="mock-tag" style="padding: 2px 8px; border: 1px solid; font-size: 11px;">CPU 23%</span>
+          <span class="mock-tag" style="padding: 2px 8px; border: 1px solid; font-size: 11px;">流量</span>
+          <span class="mock-tag" style="padding: 2px 8px; border: 1px solid; font-size: 11px;">ARP</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

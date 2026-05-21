@@ -1,0 +1,44 @@
+<h2>SNMP 模块架构</h2>
+<p class="subtitle">遵循项目现有的三层模式</p>
+
+<div class="section">
+  <div class="mockup" style="max-width: 500px;">
+    <div class="mockup-header">模块结构</div>
+    <div class="mockup-body" style="text-align: left; font-family: monospace; padding: 16px; line-height: 1.8;">
+      types/snmp.rs ── 数据模型（Device, Interface, OID 等）<br>
+      core/snmp/<br>
+      &nbsp;&nbsp;├── mod.rs ── SnmpSession 封装（get/walk/bulk）<br>
+      &nbsp;&nbsp;├── oids.rs ── 常用 OID 常量表<br>
+      &nbsp;&nbsp;├── scanner.rs ── 子网扫描（识别设备）<br>
+      &nbsp;&nbsp;├── collector.rs ── 定时采集（接口流量/状态）<br>
+      &nbsp;&nbsp;└── store.rs ── SQLite 持久化<br>
+      commands/snmp.rs ── Tauri 命令包装
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>覆盖范围</h3>
+  <div class="mockup" style="max-width: 500px;">
+    <div class="mockup-header">功能清单</div>
+    <div class="mockup-body" style="padding: 16px;">
+      <div class="options" style="gap: 8px; display: flex; flex-direction: column;">
+        <div class="option" style="padding: 8px 12px; border: 1px solid; pointer-events: none;">
+          <b>设备发现</b> — 扫描 IP 段，通过 SNMP 识别设备类型/型号
+        </div>
+        <div class="option" style="padding: 8px 12px; border: 1px solid; pointer-events: none;">
+          <b>接口信息</b> — 名称/状态/MAC/IP/速率
+        </div>
+        <div class="option" style="padding: 8px 12px; border: 1px solid; pointer-events: none;">
+          <b>流量监控</b> — 定时采集接口流量，存储历史数据
+        </div>
+        <div class="option" style="padding: 8px 12px; border: 1px solid; pointer-events: none;">
+          <b>ARP/路由表</b> — 查询网络邻居和路由信息
+        </div>
+        <div class="option" style="padding: 8px 12px; border: 1px solid; pointer-events: none;">
+          <b>设备资源</b> — CPU/内存/存储使用率
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

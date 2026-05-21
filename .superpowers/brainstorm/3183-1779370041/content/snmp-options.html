@@ -1,0 +1,76 @@
+
+<h2>SNMP 实现方案</h2>
+<p class="subtitle">三个技术路线对比</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>snmp2 crate（纯 Rust）</h3>
+      <p>原生 Rust SNMP 实现，支持 v1/v2c/v3。</p>
+      <div class="pros-cons">
+        <div class="pros">
+          <h4>Pros</h4>
+          <ul>
+            <li>跨平台，Windows 友好</li>
+            <li>无需外部依赖</li>
+            <li>集成管理连接池</li>
+          </ul>
+        </div>
+        <div class="cons">
+          <h4>Cons</h4>
+          <ul>
+            <li>社区较小，更新慢</li>
+            <li>缺少高抽象 API</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>系统命令（snmpwalk/get）</h3>
+      <p>通过 tokio::process::Command 调用 net-snmp 工具</p>
+      <div class="pros-cons">
+        <div class="pros">
+          <h4>Pros</h4>
+          <ul>
+            <li>功能完整，MIB 解析完善</li>
+            <li>易于调试</li>
+          </ul>
+        </div>
+        <div class="cons">
+          <h4>Cons</h4>
+          <ul>
+            <li>Windows 需要额外安装</li>
+            <li>进程开销，解析文本输出</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>snmp_mp2 + 自建抽象层</h3>
+      <p>更活跃的纯 Rust crate + 自定义 ASN.1/OID 封装</p>
+      <div class="pros-cons">
+        <div class="pros">
+          <h4>Pros</h4>
+          <ul>
+            <li>纯 Rust，跨平台</li>
+            <li>API 设计更现代</li>
+          </ul>
+        </div>
+        <div class="cons">
+          <h4>Cons</h4>
+          <ul>
+            <li>仍需自己封装业务逻辑</li>
+            <li>文档不够完善</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
