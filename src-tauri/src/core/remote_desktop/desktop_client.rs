@@ -12,6 +12,7 @@ pub trait DesktopClient: Send {
     async fn send_mouse_event(&mut self, event: MouseEvent) -> Result<(), String>;
     async fn resize(&mut self, width: u16, height: u16) -> Result<(), String>;
     async fn disconnect(&mut self) -> Result<(), String>;
+    async fn push_clipboard(&mut self, text: String) -> Result<(), String>;
     fn framebuffer_width(&self) -> u16;
     fn framebuffer_height(&self) -> u16;
 }

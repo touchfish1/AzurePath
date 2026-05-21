@@ -255,6 +255,30 @@ impl DesktopClient for VncClient {
         Ok(())
     }
 
+    async fn push_clipboard(&mut self, text: String) -> Result<(), String> {
+        let stream = self
+            .stream
+            .as_mut()
+            .ok_or_else(|| "VNC not connected".to_string())?;
+
+        let text_bytes = text.as_bytes();
+        let len = text_bytes.len();
+        if len > 1_048_576 {
+            return Err("VNC clipboard text too large".to_string());
+        }
+
+        let mut buf = Vec::with_capacity(8 + len);
+        buf.push(6); // msg-type: ClientCutText
+        buf.extend_from_slice(&[0u8; 3]); // padding
+        buf.extend_from_slice(&(len as u32).to_be_bytes()); // text-length
+        buf.extend_from_slice(text_bytes); // text
+
+        stream
+            .write_all(&buf)
+            .await
+            .map_err(|e| format!("VNC write ClientCutText: {e}"))
+    }
+
     async fn disconnect(&mut self) -> Result<(), String> {
         if let Some(mut stream) = self.stream.take() {
             let _ = stream.shutdown().await;

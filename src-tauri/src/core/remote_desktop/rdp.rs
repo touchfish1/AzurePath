@@ -140,6 +140,47 @@ impl DesktopClient for RdpClient {
             .map_err(|e| format!("RDP send command failed: {e}"))
     }
 
+    async fn push_clipboard(&mut self, text: String) -> Result<(), String> {
+        let tx = self
+            .cmd_tx
+            .as_ref()
+            .ok_or_else(|| "RDP not connected".to_string())?;
+
+        // Send Ctrl+V keystroke sequence to paste the text.
+        // Note: Proper cliprdr virtual channel support would require
+        // `ironrdp-cliprdr-native` integration; for now, simulation via
+        // keyboard shortcut is a practical fallback for an intranet tool.
+        let ctrl = 17u32;
+        let v_key = 86u32;
+
+        tx.send(RdpCommand::KeyEvent(KeyEvent {
+            key_code: ctrl,
+            pressed: true,
+        }))
+        .map_err(|e| format!("RDP clipboard send failed: {e}"))?;
+
+        tx.send(RdpCommand::KeyEvent(KeyEvent {
+            key_code: v_key,
+            pressed: true,
+        }))
+        .map_err(|e| format!("RDP clipboard send failed: {e}"))?;
+
+        // Small delay to let the server process the keys
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        tx.send(RdpCommand::KeyEvent(KeyEvent {
+            key_code: v_key,
+            pressed: false,
+        }))
+        .map_err(|e| format!("RDP clipboard send failed: {e}"))?;
+
+        tx.send(RdpCommand::KeyEvent(KeyEvent {
+            key_code: ctrl,
+            pressed: false,
+        }))
+        .map_err(|e| format!("RDP clipboard send failed: {e}"))
+    }
+
     async fn disconnect(&mut self) -> Result<(), String> {
         // Signal the worker thread to stop
         if let Some(tx) = self.cmd_tx.take() {

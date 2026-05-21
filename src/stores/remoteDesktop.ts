@@ -8,6 +8,7 @@ import {
   rdDisconnect,
   rdSendKey,
   rdSendMouse,
+  rdPushClipboard,
   type DesktopSession,
   type DesktopSessionInput,
   type KeyEvent,
@@ -99,8 +100,7 @@ export const useRemoteDesktopStore = defineStore("remoteDesktop", () => {
   }
 
   async function pushClipboard(sessionId: string, text: string) {
-    // Will be implemented when backend supports it
-    console.log("clipboard push:", sessionId, text);
+    await rdPushClipboard(sessionId, text);
   }
 
   return {
