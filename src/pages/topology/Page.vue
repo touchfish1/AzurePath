@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick } from "vue";
+import { ref, onMounted, onUnmounted, nextTick, watch } from "vue";
 import { useRouter } from "vue-router";
+import * as d3 from "d3";
 import {
   discoveryPeers,
   onPeerList,
@@ -15,34 +16,44 @@ import {
   type TopologyResult,
 } from "@/lib/tauri";
 import { useTopologyStore } from "@/stores/topology";
-import type { TopologyLink } from "@/lib/tauri";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
 const router = useRouter();
 const topoStore = useTopologyStore();
 
-// ============= Topology State =============
-const canvasRef = ref<HTMLCanvasElement | null>(null);
+// ============= State =============
+const svgRef = ref<SVGSVGElement | null>(null);
 const peers = ref<PeerInfo[]>([]);
 const selectedPeer = ref<PeerInfo | null>(null);
-const zoom = ref(1);
-const dragNode = ref<number | null>(null);
 const detailPopup = ref<{ x: number; y: number; peer: PeerInfo } | null>(null);
 
-interface Node {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
+interface SimNode extends d3.SimulationNodeDatum {
+  id: string;
   peer: PeerInfo;
+  deviceType: string;
+  isDiscovered: boolean;
+  isOnline: boolean;
+  cpuUsage: number | null;
+  memoryUsage: number | null;
 }
 
-const nodes = ref<Node[]>([]);
+interface SimLink extends d3.SimulationLinkDatum<SimNode> {
+  id: string;
+  latencyMs: number | null;
+  linkType: "subnet" | "discovered";
+}
+
+let simNodes: SimNode[] = [];
+let simLinks: SimLink[] = [];
+let simulation: d3.Simulation<SimNode, SimLink> | null = null;
+let svg: d3.Selection<SVGSVGElement, unknown, null, undefined> | null = null;
+let zoomGroup: d3.Selection<SVGGElement, unknown, null, undefined> | null = null;
+let gNodes: d3.Selection<SVGGElement, SimNode, SVGGElement, unknown> | null = null;
+let gLinks: d3.Selection<SVGGElement, SimLink, SVGGElement, unknown> | null = null;
+let gLabels: d3.Selection<SVGGElement, SimNode, SVGGElement, unknown> | null = null;
+let gSubLabels: d3.Selection<SVGGElement, SimNode, SVGGElement, unknown> | null = null;
 let unlistenPeerList: UnlistenFn | null = null;
 let unlistenPeerOffline: UnlistenFn | null = null;
-let animFrameId: number | null = null;
-let canvasWidth = 800;
-let canvasHeight = 600;
 
 // ============= Auto Discovery State =============
 const subnet = ref("192.168.1.0/24");
@@ -64,41 +75,7 @@ const algorithmOptions = [
   { value: "grid", label: "网格布局" },
 ];
 
-// ============= Force-directed Layout =============
-function initNodes() {
-  const centerX = canvasWidth / 2;
-  const centerY = canvasHeight / 2;
-  const existingPos = new Map(nodes.value.map((n) => [n.peer.ip, { x: n.x, y: n.y }]));
-  nodes.value = peers.value.map((peer) => {
-    const existing = existingPos.get(peer.ip);
-    return {
-      x: existing ? existing.x : centerX + (Math.random() - 0.5) * 400,
-      y: existing ? existing.y : centerY + (Math.random() - 0.5) * 400,
-      vx: 0,
-      vy: 0,
-      peer,
-    };
-  });
-  // Sync to store
-  topoStore.nodes = nodes.value.map((n) => ({
-    id: n.peer.id,
-    ip: n.peer.ip,
-    hostname: n.peer.hostname || n.peer.ip,
-    deviceType: n.peer.os === "__discovered__" ? "other" : detectDeviceType(n.peer.ip),
-    vendor: "",
-    model: "",
-    os: n.peer.os === "__discovered__" ? "" : n.peer.os,
-    cpuUsage: null,
-    memoryUsage: null,
-    status: n.peer.status === "online" ? "online" : "offline",
-    x: n.x,
-    y: n.y,
-    groupId: null,
-    mac: "",
-    interfaces: [],
-  }));
-}
-
+// ============= D3 Force Simulation =============
 function detectDeviceType(ip: string): string {
   const last = parseInt(ip.split(".")[3] || "0");
   if (last === 1 || last === 254) return "router";
@@ -106,314 +83,234 @@ function detectDeviceType(ip: string): string {
   return "other";
 }
 
-function simulateForces() {
-  const n = nodes.value.length;
-  if (n === 0) return;
+function buildSimData() {
+  const discIpSet = new Set(discoveredLinks.value.flatMap((l) => [l.source, l.target]));
+  simNodes = peers.value.map((p) => ({
+    id: p.id,
+    peer: p,
+    deviceType: p.os === "__discovered__" ? "other" : detectDeviceType(p.ip),
+    isDiscovered: p.os === "__discovered__" || discIpSet.has(p.ip),
+    isOnline: p.status === "online",
+    cpuUsage: null,
+    memoryUsage: null,
+  }));
 
-  const centerX = canvasWidth / 2;
-  const centerY = canvasHeight / 2;
-  const repulsion = 5000;
-  const gravity = 0.01;
-  const damping = 0.85;
-  const minDist = 80;
-
-  // Compute forces
-  for (let i = 0; i < n; i++) {
-    let fx = 0;
-    let fy = 0;
-
-    // Center gravity
-    fx += (centerX - nodes.value[i].x) * gravity;
-    fy += (centerY - nodes.value[i].y) * gravity;
-
-    // Repulsion between nodes
-    for (let j = 0; j < n; j++) {
-      if (i === j) continue;
-      let dx = nodes.value[i].x - nodes.value[j].x;
-      let dy = nodes.value[i].y - nodes.value[j].y;
-      let dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist < 1) dist = 1;
-      if (dist < minDist) {
-        const force = repulsion / (dist * dist);
-        fx += (dx / dist) * force;
-        fy += (dy / dist) * force;
-      }
-    }
-
-    // Apply forces with damping
-    nodes.value[i].vx = (nodes.value[i].vx + fx) * damping;
-    nodes.value[i].vy = (nodes.value[i].vy + fy) * damping;
-    nodes.value[i].x += nodes.value[i].vx;
-    nodes.value[i].y += nodes.value[i].vy;
-
-    // Keep within bounds
-    nodes.value[i].x = Math.max(30, Math.min(canvasWidth - 30, nodes.value[i].x));
-    nodes.value[i].y = Math.max(30, Math.min(canvasHeight - 30, nodes.value[i].y));
-  }
-}
-
-function getSubnets(): Map<string, PeerInfo[]> {
+  // Build links: subnet connections
+  const linkMap = new Map<string, SimLink>();
   const subnets = new Map<string, PeerInfo[]>();
   for (const peer of peers.value) {
     const parts = peer.ip.split(".");
     if (parts.length === 4) {
-      const subnet = parts.slice(0, 3).join(".");
-      if (!subnets.has(subnet)) subnets.set(subnet, []);
-      subnets.get(subnet)!.push(peer);
+      const sn = parts.slice(0, 3).join(".");
+      if (!subnets.has(sn)) subnets.set(sn, []);
+      subnets.get(sn)!.push(peer);
     }
   }
-  return subnets;
-}
-
-function getThemeColors() {
-  const style = getComputedStyle(document.documentElement);
-  return {
-    nodeFill: style.getPropertyValue('--color-ink').trim() || '#1e293b',
-    labelColor: style.getPropertyValue('--color-paper').trim() || '#f8fafc',
-    textFaint: style.getPropertyValue('--color-ink-faint').trim() || '#94a3b8',
-    inkSoft: style.getPropertyValue('--color-ink-soft').trim() || '#64748b',
-  };
-}
-
-function draw() {
-  const canvas = canvasRef.value;
-  if (!canvas) return;
-
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return;
-
-  const colors = getThemeColors();
-
-  // Update canvas size
-  const rect = canvas.getBoundingClientRect();
-  canvasWidth = canvas.width = rect.width;
-  canvasHeight = canvas.height = rect.height;
-
-  ctx.clearRect(0, 0, canvasWidth, canvasHeight);
-  ctx.save();
-  ctx.scale(zoom.value, zoom.value);
-
-  // Draw subnet clusters (same subnet = gray lines)
-  const subnets = getSubnets();
-  const nodeMap = new Map(nodes.value.map((n) => [n.peer.ip, n]));
-
-  // Draw connecting lines between nodes in same subnet
-  ctx.strokeStyle = "rgba(100, 116, 139, 0.15)";
-  ctx.lineWidth = 1;
-  for (const [, subnetPeers] of subnets) {
-    for (let i = 0; i < subnetPeers.length; i++) {
-      for (let j = i + 1; j < subnetPeers.length; j++) {
-        const a = nodeMap.get(subnetPeers[i].ip);
-        const b = nodeMap.get(subnetPeers[j].ip);
-        if (a && b) {
-          ctx.beginPath();
-          ctx.moveTo(a.x, a.y);
-          ctx.lineTo(b.x, b.y);
-          ctx.stroke();
+  const nodeIdByIp = new Map(simNodes.map((n) => [n.peer.ip, n.id]));
+  for (const [, snPeers] of subnets) {
+    for (let i = 0; i < snPeers.length; i++) {
+      for (let j = i + 1; j < snPeers.length; j++) {
+        const sId = nodeIdByIp.get(snPeers[i].ip);
+        const tId = nodeIdByIp.get(snPeers[j].ip);
+        if (sId && tId) {
+          const k = [sId, tId].sort().join("-");
+          if (!linkMap.has(k)) {
+            linkMap.set(k, { id: k, source: sId, target: tId, latencyMs: null, linkType: "subnet" });
+          }
         }
       }
     }
   }
 
-  // Draw discovered links (ping-detected connections)
-  ctx.save();
-  ctx.strokeStyle = "rgba(59, 130, 246, 0.35)";
-  ctx.lineWidth = 2;
-  ctx.setLineDash([4, 4]);
-  for (const link of discoveredLinks.value) {
-    const a = nodeMap.get(link.source);
-    const b = nodeMap.get(link.target);
-    if (a && b) {
-      ctx.beginPath();
-      ctx.moveTo(a.x, a.y);
-      ctx.lineTo(b.x, b.y);
-      ctx.stroke();
-      // Latency label at midpoint
-      if (link.latencyMs !== null) {
-        const mx = (a.x + b.x) / 2;
-        const my = (a.y + b.y) / 2;
-        ctx.fillStyle = colors.textFaint;
-        ctx.font = "8px monospace";
-        ctx.textAlign = "center";
-        ctx.fillText(`${link.latencyMs.toFixed(1)}ms`, mx, my - 8);
+  // Discovered links
+  for (const dl of discoveredLinks.value) {
+    const sId = nodeIdByIp.get(dl.source);
+    const tId = nodeIdByIp.get(dl.target);
+    if (sId && tId) {
+      const k = [sId, tId].sort().join("-");
+      linkMap.set(k, { id: k, source: sId, target: tId, latencyMs: dl.latencyMs, linkType: "discovered" });
+    }
+  }
+
+  simLinks = Array.from(linkMap.values());
+}
+
+function initD3() {
+  if (!svgRef.value) return;
+
+  // Clear previous
+  d3.select(svgRef.value).selectAll("*").remove();
+
+  svg = d3.select(svgRef.value);
+
+  // Zoom behavior: pan on empty drag, scroll to zoom
+  const zoomBehavior = d3.zoom<SVGSVGElement, unknown>()
+    .scaleExtent([0.2, 5])
+    .on("zoom", (event) => {
+      zoomGroup?.attr("transform", event.transform.toString());
+    });
+
+  svg.call(zoomBehavior);
+
+  zoomGroup = svg.append("g");
+
+  // Create groups for different layers
+  gLinks = zoomGroup.append("g").attr("class", "links") as any;
+  gNodes = zoomGroup.append("g").attr("class", "nodes") as any;
+  gLabels = zoomGroup.append("g").attr("class", "labels") as any;
+  gSubLabels = zoomGroup.append("g").attr("class", "sub-labels") as any;
+
+  buildSimData();
+
+  // Create force simulation
+  simulation = d3.forceSimulation<SimNode>(simNodes)
+    .force("link", d3.forceLink<SimNode, SimLink>(simLinks).id((d) => d.id).distance(120))
+    .force("charge", d3.forceManyBody().strength(-400))
+    .force("center", d3.forceCenter(400, 300))
+    .force("collision", d3.forceCollide(30))
+    .alphaDecay(0.02)
+    .on("tick", ticked);
+
+  // Draw links
+  gLinks?.selectAll("line")
+    .data(simLinks)
+    .join("line")
+    .attr("stroke", (d) => d.linkType === "discovered" ? "rgba(59, 130, 246, 0.4)" : "rgba(100, 116, 139, 0.15)")
+    .attr("stroke-width", (d) => d.linkType === "discovered" ? 2 : 1)
+    .attr("stroke-dasharray", (d) => d.linkType === "discovered" ? "5,4" : "none");
+
+  // Draw nodes with shapes
+  gNodes?.selectAll("g")
+    .data(simNodes)
+    .join("g")
+    .attr("class", "topo-node")
+    .each(function (d) {
+      const el = d3.select(this);
+      const shape = getDeviceShape(d.deviceType);
+      const color = getDeviceColor(d.deviceType, d.isDiscovered);
+
+      if (shape === "diamond") {
+        el.append("path")
+          .attr("d", d3.symbol<unknown, unknown>().type(d3.symbolDiamond).size(900)())
+          .attr("fill", color)
+          .attr("stroke", d.isOnline ? "#22c55e" : "none")
+          .attr("stroke-width", d.isOnline ? 2.5 : 0);
+      } else if (shape === "roundedRect") {
+        el.append("rect")
+          .attr("x", -18).attr("y", -13)
+          .attr("width", 36).attr("height", 26)
+          .attr("rx", 6).attr("ry", 6)
+          .attr("fill", color)
+          .attr("stroke", d.isOnline ? "#22c55e" : "none")
+          .attr("stroke-width", d.isOnline ? 2.5 : 0);
+      } else {
+        el.append("circle")
+          .attr("r", 20)
+          .attr("fill", color)
+          .attr("stroke", d.isOnline ? "#22c55e" : "none")
+          .attr("stroke-width", d.isOnline ? 2.5 : 0);
       }
-    }
-  }
-  ctx.restore();
 
-  // Draw nodes
-  for (const node of nodes.value) {
-    const { x, y } = node;
-    const topoNode = topoStore.nodes.find((n) => n.id === node.peer.id || n.ip === node.peer.ip);
-    const isSelected = selectedPeer.value?.ip === node.peer.ip;
-    const isDiscovered = node.peer.os === "__discovered__";
-    const isFilteredOut = topoStore.searchQuery && !topoStore.filteredNodes.find((n) => n.id === node.peer.id);
+      // CPU usage ring
+      if (d.cpuUsage !== null) {
+        el.append("circle")
+          .attr("class", "status-ring")
+          .attr("r", 24)
+          .attr("fill", "none")
+          .attr("stroke", d.cpuUsage! > 80 ? "#ef4444" : d.cpuUsage! > 50 ? "#f59e0b" : "#22c55e")
+          .attr("stroke-width", 2.5);
+      }
+    })
+    // Drag behavior
+    .call(d3.drag<SVGGElement, SimNode>()
+      .on("start", function (event, d) {
+        if (!event.active) simulation?.alphaTarget(0.3).restart();
+        d.fx = d.x;
+        d.fy = d.y;
+      })
+      .on("drag", function (event, d) {
+        d.fx = event.x;
+        d.fy = event.y;
+      })
+      .on("end", function (event, d) {
+        if (!event.active) simulation?.alphaTarget(0);
+        d.fx = null;
+        d.fy = null;
+      }) as any)
+    // Click to select
+    .on("click", function (event, d) {
+      event.stopPropagation();
+      selectedPeer.value = d.peer;
+      detailPopup.value = {
+        x: event.clientX || event.sourceEvent?.clientX,
+        y: (event.clientY || event.sourceEvent?.clientY) - 10,
+        peer: d.peer,
+      };
+    });
 
-    if (isFilteredOut) {
-      ctx.globalAlpha = 0.15;
-    }
+  // Draw labels
+  gLabels?.selectAll("text")
+    .data(simNodes)
+    .join("text")
+    .text((d) => {
+      const label = d.peer.hostname || d.peer.ip;
+      return label.length > 14 ? label.slice(0, 14) + "..." : label;
+    })
+    .attr("text-anchor", "middle")
+    .attr("dy", 36)
+    .attr("fill", "currentColor")
+    .attr("font-size", "10px")
+    .attr("font-family", "monospace")
+    .style("pointer-events", "none");
 
-    // Status ring (outer circle showing CPU/memory health)
-    if (topoNode?.cpuUsage !== null && topoNode !== undefined) {
-      ctx.beginPath();
-      ctx.arc(x, y, 26, 0, Math.PI * 2);
-      ctx.strokeStyle = topoNode.cpuUsage! > 80 ? "#ef4444" : topoNode.cpuUsage! > 50 ? "#f59e0b" : "#22c55e";
-      ctx.lineWidth = 3;
-      ctx.stroke();
-    }
+  // Sub-labels (device type)
+  gSubLabels?.selectAll("text")
+    .data(simNodes)
+    .join("text")
+    .text((d) => d.deviceType)
+    .attr("text-anchor", "middle")
+    .attr("dy", 48)
+    .attr("fill", "#64748b")
+    .attr("font-size", "8px")
+    .style("pointer-events", "none");
 
-    // Device-type-specific shape
-    const shape = getDeviceShape(topoNode?.deviceType || "other");
+  function ticked() {
+    gLinks?.selectAll<SVGLineElement, SimLink>("line")
+      .attr("x1", (d) => (d.source as SimNode).x!)
+      .attr("y1", (d) => (d.source as SimNode).y!)
+      .attr("x2", (d) => (d.target as SimNode).x!)
+      .attr("y2", (d) => (d.target as SimNode).y!);
 
-    if (shape === "diamond") {
-      // Router: diamond
-      ctx.beginPath();
-      ctx.moveTo(x, y - 22);
-      ctx.lineTo(x + 22, y);
-      ctx.lineTo(x, y + 22);
-      ctx.lineTo(x - 22, y);
-      ctx.closePath();
-    } else if (shape === "roundedRect") {
-      // Switch: rounded rectangle
-      const r = 6;
-      const w = 36;
-      const h = 26;
-      ctx.beginPath();
-      ctx.moveTo(x - w/2 + r, y - h/2);
-      ctx.lineTo(x + w/2 - r, y - h/2);
-      ctx.quadraticCurveTo(x + w/2, y - h/2, x + w/2, y - h/2 + r);
-      ctx.lineTo(x + w/2, y + h/2 - r);
-      ctx.quadraticCurveTo(x + w/2, y + h/2, x + w/2 - r, y + h/2);
-      ctx.lineTo(x - w/2 + r, y + h/2);
-      ctx.quadraticCurveTo(x - w/2, y + h/2, x - w/2, y + h/2 - r);
-      ctx.lineTo(x - w/2, y - h/2 + r);
-      ctx.quadraticCurveTo(x - w/2, y - h/2, x - w/2 + r, y - h/2);
-      ctx.closePath();
-    } else {
-      // Server/Other: circle (default)
-      ctx.beginPath();
-      ctx.arc(x, y, 22, 0, Math.PI * 2);
-    }
+    gNodes?.selectAll<SVGGElement, SimNode>("g")
+      .attr("transform", (d) => `translate(${d.x},${d.y})`);
 
-    ctx.fillStyle = getDeviceColor(topoNode?.deviceType || "other", isSelected, isDiscovered);
-    ctx.fill();
+    gLabels?.selectAll<SVGTextElement, SimNode>("text")
+      .attr("x", (d) => d.x!)
+      .attr("y", (d) => d.y!);
 
-    // Border for discovered/selected
-    if (isSelected) {
-      ctx.strokeStyle = "#22c55e";
-      ctx.lineWidth = 3;
-      ctx.stroke();
-    } else if (isDiscovered) {
-      ctx.strokeStyle = "rgba(59, 130, 246, 0.5)";
-      ctx.lineWidth = 2;
-      ctx.setLineDash([3, 3]);
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
-
-    // Labels
-    ctx.fillStyle = colors.labelColor;
-    ctx.font = "10px monospace";
-    ctx.textAlign = "center";
-    const label = node.peer.hostname || node.peer.ip;
-    ctx.fillText(label.length > 14 ? label.slice(0, 14) + "..." : label, x, y + 38);
-
-    // Type label
-    const typeLabel = topoNode?.deviceType || (isDiscovered ? "ping" : node.peer.os);
-    if (typeLabel) {
-      ctx.fillStyle = colors.inkSoft + "99";
-      ctx.font = "8px sans-serif";
-      ctx.fillText(typeLabel, x, y + 50);
-    }
-
-    ctx.globalAlpha = 1;
-  }
-
-  function getDeviceShape(deviceType: string): string {
-    switch (deviceType) {
-      case "router": case "firewall": return "diamond";
-      case "switch": case "ap": return "roundedRect";
-      default: return "circle";
-    }
-  }
-
-  function getDeviceColor(deviceType: string, isSelected: boolean, isDiscovered: boolean): string {
-    if (isSelected) return "#22c55e";
-    if (isDiscovered) return "#3b82f6";
-    switch (deviceType) {
-      case "router": return "#7c3aed";   // purple
-      case "switch": return "#0891b2";   // cyan
-      case "firewall": return "#dc2626";  // red
-      case "server": return "#2563eb";   // blue
-      case "camera": return "#059669";   // green
-      case "printer": return "#d97706";  // amber
-      default: return "#475569";         // slate
-    }
-  }
-
-  ctx.restore();
-
-  // Continue animation
-  simulateForces();
-  animFrameId = requestAnimationFrame(draw);
-}
-
-// ============= Interaction =============
-function getNodeAt(clientX: number, clientY: number): Node | null {
-  const canvas = canvasRef.value;
-  if (!canvas) return null;
-
-  const rect = canvas.getBoundingClientRect();
-  const x = (clientX - rect.left) / zoom.value;
-  const y = (clientY - rect.top) / zoom.value;
-
-  for (const node of nodes.value) {
-    const dx = x - node.x;
-    const dy = y - node.y;
-    if (dx * dx + dy * dy < 22 * 22) {
-      return node;
-    }
-  }
-  return null;
-}
-
-function handleMouseDown(e: MouseEvent) {
-  const node = getNodeAt(e.clientX, e.clientY);
-  if (node) {
-    const idx = nodes.value.indexOf(node);
-    dragNode.value = idx;
-    selectedPeer.value = node.peer;
-    detailPopup.value = {
-      x: e.clientX,
-      y: e.clientY - 10,
-      peer: node.peer,
-    };
-  } else {
-    selectedPeer.value = null;
-    detailPopup.value = null;
+    gSubLabels?.selectAll<SVGTextElement, SimNode>("text")
+      .attr("x", (d) => d.x!)
+      .attr("y", (d) => d.y!);
   }
 }
 
-function handleMouseMove(e: MouseEvent) {
-  if (dragNode.value !== null) {
-    const canvas = canvasRef.value;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    nodes.value[dragNode.value].x = (e.clientX - rect.left) / zoom.value;
-    nodes.value[dragNode.value].y = (e.clientY - rect.top) / zoom.value;
+function getDeviceShape(deviceType: string): string {
+  switch (deviceType) {
+    case "router": case "firewall": return "diamond";
+    case "switch": case "ap": return "roundedRect";
+    default: return "circle";
   }
 }
 
-function handleMouseUp() {
-  dragNode.value = null;
-}
-
-function handleWheel(e: WheelEvent) {
-  e.preventDefault();
-  if (e.deltaY < 0) {
-    zoom.value = Math.min(3, zoom.value + 0.1);
-  } else {
-    zoom.value = Math.max(0.3, zoom.value - 0.1);
+function getDeviceColor(deviceType: string, isDiscovered: boolean): string {
+  if (isDiscovered) return "#3b82f6";
+  switch (deviceType) {
+    case "router": return "#7c3aed";
+    case "switch": return "#0891b2";
+    case "firewall": return "#dc2626";
+    case "server": return "#2563eb";
+    case "camera": return "#059669";
+    default: return "#475569";
   }
 }
 
@@ -426,7 +323,7 @@ function viewportWidth(): number {
   return window.innerWidth;
 }
 
-function goToChat(_ip: string) {
+function goToChat() {
   closeDetail();
   router.push("/chat");
 }
@@ -438,17 +335,17 @@ async function loadPeers() {
   } catch {
     // LAN services not running
   }
-  initNodes();
+  initD3();
 }
 
 function handlePeerList(updatedPeers: PeerInfo[]) {
   peers.value = updatedPeers;
-  initNodes();
+  initD3();
 }
 
 function handlePeerOffline(payload: { id: string }) {
   peers.value = peers.value.filter((p) => p.id !== payload.id);
-  initNodes();
+  initD3();
   if (detailPopup.value?.peer.id === payload.id) {
     closeDetail();
   }
@@ -458,64 +355,45 @@ function handlePeerOffline(payload: { id: string }) {
 async function switchLayout(algo: string) {
   topoStore.layoutAlgorithm = algo;
   await topoStore.computeLayout();
-  // Sync back to canvas nodes
+  // Sync d3 node positions
   for (const topoNode of topoStore.nodes) {
-    const canvasNode = nodes.value.find((n) => n.peer.id === topoNode.id || n.peer.ip === topoNode.ip);
-    if (canvasNode) {
-      canvasNode.x = topoNode.x;
-      canvasNode.y = topoNode.y;
+    const simNode = simNodes.find((n) => n.id === topoNode.id || n.peer.ip === topoNode.ip);
+    if (simNode) {
+      simNode.x = topoNode.x;
+      simNode.y = topoNode.y;
+      simNode.fx = topoNode.x;
+      simNode.fy = topoNode.y;
     }
   }
+  simulation?.alpha(0).tick();
+  ticked();
+  // Release fixed positions after a moment
+  setTimeout(() => {
+    for (const n of simNodes) { n.fx = null; n.fy = null; }
+  }, 100);
+}
+
+function ticked() {
+  gLinks?.selectAll<SVGLineElement, SimLink>("line")
+    .attr("x1", (d) => (d.source as SimNode).x!)
+    .attr("y1", (d) => (d.source as SimNode).y!)
+    .attr("x2", (d) => (d.target as SimNode).x!)
+    .attr("y2", (d) => (d.target as SimNode).y!);
+
+  gNodes?.selectAll<SVGGElement, SimNode>("g")
+    .attr("transform", (d) => `translate(${d.x},${d.y})`);
+
+  gLabels?.selectAll<SVGTextElement, SimNode>("text")
+    .attr("x", (d) => d.x!)
+    .attr("y", (d) => d.y!);
+
+  gSubLabels?.selectAll<SVGTextElement, SimNode>("text")
+    .attr("x", (d) => d.x!)
+    .attr("y", (d) => d.y!);
 }
 
 async function saveCurrentSnapshot() {
   if (!snapshotName.value) return;
-  // Build links from subnet and discovered links
-  const topoNodes = topoStore.nodes.map((n) => ({
-    ...n,
-    interfaces: [],
-  }));
-  const linkPairs: TopologyLink[] = [];
-  const subnets = getSubnets();
-  const ipToId = new Map(topoNodes.map((n) => [n.ip, n.id]));
-  for (const [, subnetPeers] of subnets) {
-    for (let i = 0; i < subnetPeers.length; i++) {
-      for (let j = i + 1; j < subnetPeers.length; j++) {
-        const srcId = ipToId.get(subnetPeers[i].ip);
-        const tgtId = ipToId.get(subnetPeers[j].ip);
-        if (srcId && tgtId) {
-          linkPairs.push({
-            id: `${srcId}-${tgtId}`,
-            sourceId: srcId,
-            targetId: tgtId,
-            linkType: "wired",
-            speed: null,
-            latencyMs: null,
-            bandwidthUsage: null,
-            sourceIface: null,
-            targetIface: null,
-          });
-        }
-      }
-    }
-  }
-  for (const link of discoveredLinks.value) {
-    const srcId = ipToId.get(link.source);
-    const tgtId = ipToId.get(link.target);
-    if (srcId && tgtId) {
-      linkPairs.push({
-        id: `disc-${srcId}-${tgtId}`,
-        sourceId: srcId,
-        targetId: tgtId,
-        linkType: "wired",
-        speed: null,
-        latencyMs: link.latencyMs,
-        bandwidthUsage: null,
-        sourceIface: null,
-        targetIface: null,
-      });
-    }
-  }
   try {
     const id = await topoStore.saveSnapshot(snapshotName.value);
     snapshotName.value = "";
@@ -527,7 +405,6 @@ async function saveCurrentSnapshot() {
 
 async function loadSnapshotById(snapshotId: string) {
   await topoStore.loadSnapshot(snapshotId);
-  // Sync back to canvas peers
   peers.value = topoStore.nodes.map((n) => ({
     id: n.id,
     hostname: n.hostname,
@@ -537,7 +414,7 @@ async function loadSnapshotById(snapshotId: string) {
     last_seen: new Date().toISOString(),
     status: n.status === "online" ? "online" : "offline",
   }));
-  initNodes();
+  initD3();
 }
 
 // ============= Auto Discovery =============
@@ -567,7 +444,6 @@ function handleDiscoverResult(payload: TopologyResult) {
   discovering.value = false;
   discoveredLinks.value = payload.links;
 
-  // Convert discovered nodes to PeerInfo-like objects and merge into peers
   const existingIps = new Set(peers.value.map((p) => p.ip));
   for (const node of payload.nodes) {
     if (!existingIps.has(node.ip)) {
@@ -583,13 +459,17 @@ function handleDiscoverResult(payload: TopologyResult) {
       existingIps.add(node.ip);
     }
   }
-
-  initNodes();
+  initD3();
 }
 
 function handleDiscoverError() {
   discovering.value = false;
 }
+
+// Watch for layout algorithm changes from store (when loaded from snapshot)
+watch(() => topoStore.layoutAlgorithm, (algo) => {
+  if (simNodes.length > 0) switchLayout(algo);
+});
 
 onMounted(async () => {
   unlistenPeerList = await onPeerList(handlePeerList);
@@ -599,19 +479,16 @@ onMounted(async () => {
   unlistenDiscoverError = await onTopologyError(handleDiscoverError);
   await loadPeers();
   topoStore.loadSnapshots();
-
-  // Start animation loop
   await nextTick();
-  animFrameId = requestAnimationFrame(draw);
 });
 
 onUnmounted(() => {
+  simulation?.stop();
   unlistenPeerList?.();
   unlistenPeerOffline?.();
   unlistenDiscoverProgress?.();
   unlistenDiscoverResult?.();
   unlistenDiscoverError?.();
-  if (animFrameId !== null) cancelAnimationFrame(animFrameId);
 });
 </script>
 
@@ -781,17 +658,14 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- Canvas -->
+    <!-- SVG Canvas -->
     <div class="relative flex-1 overflow-hidden">
-      <canvas
-        ref="canvasRef"
-        class="h-full w-full cursor-grab active:cursor-grabbing"
-        @mousedown="handleMouseDown"
-        @mousemove="handleMouseMove"
-        @mouseup="handleMouseUp"
-        @mouseleave="handleMouseUp"
-        @wheel.prevent="handleWheel"
-      />
+      <svg
+        ref="svgRef"
+        class="h-full w-full"
+        style="cursor: grab;"
+        @click.self="closeDetail"
+      ></svg>
 
       <!-- Zoom controls -->
       <div
@@ -799,23 +673,7 @@ onUnmounted(() => {
       >
         <button
           class="rounded-lg px-2 py-1 text-xs text-ink-soft transition-colors hover:bg-paper-deep hover:text-ink"
-          @click="zoom = Math.max(0.3, zoom - 0.2)"
-        >
-          -
-        </button>
-        <span class="min-w-[3rem] text-center text-xs font-mono text-ink-faint">
-          {{ (zoom * 100).toFixed(0) }}%
-        </span>
-        <button
-          class="rounded-lg px-2 py-1 text-xs text-ink-soft transition-colors hover:bg-paper-deep hover:text-ink"
-          @click="zoom = Math.min(3, zoom + 0.2)"
-        >
-          +
-        </button>
-        <span class="mx-1 h-4 w-px bg-paper-deep" />
-        <button
-          class="rounded-lg px-2 py-1 text-xs text-ink-soft transition-colors hover:bg-paper-deep hover:text-ink"
-          @click="zoom = 1"
+          @click="d3.select(svgRef!).transition().duration(300).call(d3.zoom().transform as any, d3.zoomIdentity)"
         >
           重置
         </button>
@@ -824,7 +682,7 @@ onUnmounted(() => {
       <!-- Empty state -->
       <div
         v-if="peers.length === 0"
-        class="absolute inset-0 flex items-center justify-center"
+        class="absolute inset-0 flex items-center justify-center pointer-events-none"
       >
         <div class="text-center max-w-sm px-6">
           <div class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl border border-dashed border-paper-deep/40 bg-paper/80">
@@ -891,7 +749,7 @@ onUnmounted(() => {
         <div class="border-t border-paper-deep/30 px-4 py-2">
           <button
             class="w-full rounded-lg px-3 py-1.5 text-xs font-medium text-bamboo transition-colors hover:bg-bamboo/5"
-            @click="goToChat(detailPopup.peer.ip)"
+            @click="goToChat"
           >
             发送消息
           </button>
@@ -931,7 +789,7 @@ onUnmounted(() => {
           <span class="inline-block h-0.5 w-6 border-t-2 border-dashed border-blue-400/40" />
           发现连接
         </span>
-        <span class="ml-auto">滚轮缩放 | 拖拽节点移动</span>
+        <span class="ml-auto">滚轮缩放 | 空白拖拽平移 | 拖拽节点移动</span>
       </div>
     </div>
   </div>

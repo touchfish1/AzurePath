@@ -114,38 +114,50 @@ pub fn compute_samples(
 }
 
 // ---------------------------------------------------------------------------
-// Windows implementation (wmic)
+// Windows implementation (PowerShell — replaces deprecated wmic.exe)
 // ---------------------------------------------------------------------------
+
+/// Trim surrounding double-quotes from a CSV field value.
+#[cfg(windows)]
+fn trim_quotes(s: &str) -> &str {
+    s.trim_matches('"')
+}
 
 #[cfg(windows)]
 fn get_interfaces_wmic() -> Result<Vec<InterfaceInfo>, String> {
-    let output = std::process::Command::new("wmic")
+    let output = std::process::Command::new("powershell")
         .args([
-            "nic",
-            "where",
-            "NetEnabled=TRUE",
-            "get",
-            "Index,NetConnectionID,Name",
-            "/format:csv",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "Get-CimInstance Win32_NetworkAdapter | Where-Object { $_.NetEnabled } | Select-Object Index, NetConnectionID, Name | ConvertTo-Csv -NoTypeInformation",
         ])
         .output()
-        .map_err(|e| format!("Failed to run wmic for interfaces: {}", e))?;
+        .map_err(|e| format!("Failed to run PowerShell for interfaces: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("PowerShell exited with error: {}", stderr));
+    }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let interfaces = parse_interface_csv(&stdout)?;
 
     // Get IP addresses per interface index.
-    let ip_output = std::process::Command::new("wmic")
+    let ip_output = std::process::Command::new("powershell")
         .args([
-            "nicconfig",
-            "where",
-            "IPEnabled=TRUE",
-            "get",
-            "Index,IPAddress",
-            "/format:csv",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "Get-CimInstance Win32_NetworkAdapterConfiguration | Where-Object { $_.IPEnabled } | Select-Object Index, @{N='IPAddress';E={$_.IPAddress -join ';'}} | ConvertTo-Csv -NoTypeInformation",
         ])
         .output()
-        .map_err(|e| format!("Failed to run wmic for IP config: {}", e))?;
+        .map_err(|e| format!("Failed to run PowerShell for IP config: {}", e))?;
+
+    if !ip_output.status.success() {
+        let stderr = String::from_utf8_lossy(&ip_output.stderr);
+        return Err(format!("PowerShell exited with error: {}", stderr));
+    }
 
     let ip_stdout = String::from_utf8_lossy(&ip_output.stdout);
     let ip_map = parse_ip_config_csv(&ip_stdout);
@@ -154,8 +166,7 @@ fn get_interfaces_wmic() -> Result<Vec<InterfaceInfo>, String> {
     let mut result: Vec<InterfaceInfo> = interfaces
         .into_iter()
         .map(|mut info| {
-            // Extract index from name (we stored index in name temporarily)
-            let idx = info.name.clone();
+            let idx = info.name.clone(); // stores Index temporarily
             if let Some(ip) = ip_map.get(&idx) {
                 info.ip = ip.clone();
             }
@@ -179,18 +190,18 @@ fn parse_interface_csv(output: &str) -> Result<Vec<InterfaceInfo>, String> {
 
     for line in lines {
         let line = line.trim();
-        if line.is_empty() || line.to_lowercase().contains("node") {
+        if line.is_empty() {
             continue;
         }
         let parts: Vec<&str> = line.split(',').collect();
-        // Format: Node,Index,NetConnectionID,Name
-        if parts.len() >= 4 {
-            let index = parts[1].trim().to_string();
-            let friendly_name = parts[2].trim().to_string();
-            let name = parts[3].trim().to_string();
+        // Format (PowerShell CSV): "Index","NetConnectionID","Name"
+        if parts.len() >= 3 {
+            let index = trim_quotes(parts[0]).to_string();
+            let friendly_name = trim_quotes(parts[1]).to_string();
+            let name = trim_quotes(parts[2]).to_string();
             if !name.is_empty() {
                 interfaces.push(InterfaceInfo {
-                    name: index.clone(), // Store index for later IP lookup
+                    name: index, // Store index for later IP lookup
                     friendly_name,
                     ip: String::new(),
                 });
@@ -210,15 +221,15 @@ fn parse_ip_config_csv(output: &str) -> HashMap<String, String> {
 
     for line in lines {
         let line = line.trim();
-        if line.is_empty() || line.to_lowercase().contains("node") {
+        if line.is_empty() {
             continue;
         }
         let parts: Vec<&str> = line.split(',').collect();
-        // Format: Node,Index,IPAddress
-        if parts.len() >= 3 {
-            let index = parts[1].trim().to_string();
-            let ip = parts[2].trim().to_string();
-            // IPAddress is semicolon-separated list; take the first IPv4.
+        // Format (PowerShell CSV): "Index","IPAddress"
+        if parts.len() >= 2 {
+            let index = trim_quotes(parts[0]).to_string();
+            let ip = trim_quotes(parts[1]).to_string();
+            // IPAddress is semicolon-separated list; take the first.
             let first_ip = ip.split(';').next().unwrap_or("").to_string();
             map.insert(index, first_ip);
         }
@@ -229,16 +240,20 @@ fn parse_ip_config_csv(output: &str) -> HashMap<String, String> {
 
 #[cfg(windows)]
 fn get_counters_wmic() -> Result<HashMap<String, CounterSnapshot>, String> {
-    let output = std::process::Command::new("wmic")
+    let output = std::process::Command::new("powershell")
         .args([
-            "path",
-            "Win32_PerfRawData_Tcpip_NetworkInterface",
-            "get",
-            "Name,BytesReceivedPersec,BytesSentPersec",
-            "/format:csv",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "Get-CimInstance Win32_PerfRawData_Tcpip_NetworkInterface | Select-Object Name, BytesReceivedPersec, BytesSentPersec | ConvertTo-Csv -NoTypeInformation",
         ])
         .output()
-        .map_err(|e| format!("Failed to run wmic for counters: {}", e))?;
+        .map_err(|e| format!("Failed to run PowerShell for counters: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("PowerShell exited with error: {}", stderr));
+    }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     parse_counter_csv(&stdout)
@@ -253,15 +268,15 @@ fn parse_counter_csv(output: &str) -> Result<HashMap<String, CounterSnapshot>, S
 
     for line in lines {
         let line = line.trim();
-        if line.is_empty() || line.to_lowercase().contains("node") {
+        if line.is_empty() {
             continue;
         }
         let parts: Vec<&str> = line.split(',').collect();
-        // Format: Node,Name,BytesReceivedPersec,BytesSentPersec
-        if parts.len() >= 4 {
-            let name = parts[1].trim().to_string();
-            let rx: u64 = parts[2].trim().parse().unwrap_or(0);
-            let tx: u64 = parts[3].trim().parse().unwrap_or(0);
+        // Format (PowerShell CSV): "Name","BytesReceivedPersec","BytesSentPersec"
+        if parts.len() >= 3 {
+            let name = trim_quotes(parts[0]).to_string();
+            let rx: u64 = trim_quotes(parts[1]).parse().unwrap_or(0);
+            let tx: u64 = trim_quotes(parts[2]).parse().unwrap_or(0);
             counters.insert(name, CounterSnapshot { rx, tx });
         }
     }
@@ -474,9 +489,9 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn test_parse_interface_csv_valid() {
-        let csv = "Node,Index,NetConnectionID,Name\n\
-                    HOST,0,Wi-Fi,Intel Wi-Fi 6\n\
-                    HOST,1,Ethernet,Realtek PCIe GbE\n";
+        let csv = "\"Index\",\"NetConnectionID\",\"Name\"\n\
+                    \"0\",\"Wi-Fi\",\"Intel Wi-Fi 6\"\n\
+                    \"1\",\"Ethernet\",\"Realtek PCIe GbE\"\n";
         let interfaces = parse_interface_csv(csv).unwrap();
         assert_eq!(interfaces.len(), 2);
         assert_eq!(interfaces[0].friendly_name, "Wi-Fi");
@@ -486,7 +501,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn test_parse_interface_csv_empty() {
-        let csv = "Node,Index,NetConnectionID,Name\n";
+        let csv = "\"Index\",\"NetConnectionID\",\"Name\"\n";
         let interfaces = parse_interface_csv(csv).unwrap();
         assert!(interfaces.is_empty());
     }
@@ -494,18 +509,20 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn test_parse_interface_csv_skips_node_line() {
-        let csv = "Node,Index,NetConnectionID,Name\n\
-                    node,0,Wi-Fi,Intel\n";
+        // PowerShell CSV has no "Node" column; lines with stray content are handled gracefully.
+        let csv = "\"Index\",\"NetConnectionID\",\"Name\"\n\
+                    \"#comment\",\"Virtual\",\"VMware\"\n";
         let interfaces = parse_interface_csv(csv).unwrap();
-        assert_eq!(interfaces.len(), 0); // "node" in line triggers skip
+        assert_eq!(interfaces.len(), 1);
+        assert_eq!(interfaces[0].friendly_name, "Virtual");
     }
 
     #[cfg(windows)]
     #[test]
     fn test_parse_ip_config_csv_valid() {
-        let csv = "Node,Index,IPAddress\n\
-                    HOST,0,192.168.1.100\n\
-                    HOST,1,10.0.0.5\n";
+        let csv = "\"Index\",\"IPAddress\"\n\
+                    \"0\",\"192.168.1.100\"\n\
+                    \"1\",\"10.0.0.5\"\n";
         let map = parse_ip_config_csv(csv);
         assert_eq!(map.len(), 2);
         assert_eq!(map.get("0").unwrap(), "192.168.1.100");
@@ -516,8 +533,8 @@ mod tests {
     #[test]
     fn test_parse_ip_config_csv_semicolon_ip() {
         // IPAddress can be semicolon-separated; should take first
-        let csv = "Node,Index,IPAddress\n\
-                    HOST,0,\"192.168.1.100;fe80::1\"\n";
+        let csv = "\"Index\",\"IPAddress\"\n\
+                    \"0\",\"192.168.1.100;fe80::1\"\n";
         let map = parse_ip_config_csv(csv);
         assert_eq!(map.get("0").unwrap(), "192.168.1.100");
     }
@@ -525,9 +542,9 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn test_parse_counter_csv_valid() {
-        let csv = "Node,Name,BytesReceivedPersec,BytesSentPersec\n\
-                    HOST,eth0,1000,500\n\
-                    HOST,eth1,2000,800\n";
+        let csv = "\"Name\",\"BytesReceivedPersec\",\"BytesSentPersec\"\n\
+                    \"eth0\",\"1000\",\"500\"\n\
+                    \"eth1\",\"2000\",\"800\"\n";
         let counters = parse_counter_csv(csv).unwrap();
         assert_eq!(counters.len(), 2);
         assert_eq!(counters["eth0"].rx, 1000);
@@ -539,8 +556,8 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn test_parse_counter_csv_invalid_number_defaults_zero() {
-        let csv = "Node,Name,BytesReceivedPersec,BytesSentPersec\n\
-                    HOST,eth0,notanumber,500\n";
+        let csv = "\"Name\",\"BytesReceivedPersec\",\"BytesSentPersec\"\n\
+                    \"eth0\",\"notanumber\",\"500\"\n";
         let counters = parse_counter_csv(csv).unwrap();
         assert_eq!(counters["eth0"].rx, 0); // parse failed
         assert_eq!(counters["eth0"].tx, 500);
@@ -549,7 +566,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn test_parse_counter_csv_empty() {
-        let csv = "Node,Name,BytesReceivedPersec,BytesSentPersec\n";
+        let csv = "\"Name\",\"BytesReceivedPersec\",\"BytesSentPersec\"\n";
         let counters = parse_counter_csv(csv).unwrap();
         assert!(counters.is_empty());
     }

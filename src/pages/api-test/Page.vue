@@ -186,34 +186,46 @@ onMounted(() => {
           <!-- Auth section -->
           <div class="mt-4">
             <h3 class="mb-2 text-xs font-semibold uppercase tracking-wider text-ink-soft">认证</h3>
-            <select v-model="store.currentRequest.auth!.authType"
-              class="mb-2 w-full rounded-lg border border-paper-deep/30 bg-paper-deep/15 px-2.5 py-1.5 text-xs text-ink outline-none">
-              <option value="none">无认证</option>
-              <option value="basic">Basic Auth</option>
-              <option value="bearer">Bearer Token</option>
-              <option value="apiKey">API Key</option>
-            </select>
-            <template v-if="store.currentRequest.auth?.authType === 'basic'">
-              <input v-model="store.currentRequest.auth!.username" placeholder="用户名"
-                class="mb-1 w-full rounded border border-paper-deep/30 bg-paper-deep/15 px-2 py-1 text-xs text-ink outline-none" />
-              <input v-model="store.currentRequest.auth!.password" type="password" placeholder="密码"
-                class="w-full rounded border border-paper-deep/30 bg-paper-deep/15 px-2 py-1 text-xs text-ink outline-none" />
-            </template>
-            <template v-if="store.currentRequest.auth?.authType === 'bearer'">
-              <input v-model="store.currentRequest.auth!.token" placeholder="输入 Token"
-                class="w-full rounded border border-paper-deep/30 bg-paper-deep/15 px-2 py-1 text-xs text-ink outline-none" />
-            </template>
-            <template v-if="store.currentRequest.auth?.authType === 'apiKey'">
-              <input v-model="store.currentRequest.auth!.apiKeyName" placeholder="Key 名称"
-                class="mb-1 w-full rounded border border-paper-deep/30 bg-paper-deep/15 px-2 py-1 text-xs text-ink outline-none" />
-              <input v-model="store.currentRequest.auth!.apiKey" placeholder="Key 值"
-                class="mb-1 w-full rounded border border-paper-deep/30 bg-paper-deep/15 px-2 py-1 text-xs text-ink outline-none" />
-              <select v-model="store.currentRequest.auth!.apiKeyLocation"
-                class="w-full rounded border border-paper-deep/30 bg-paper-deep/15 px-2 py-1 text-xs text-ink outline-none">
-                <option value="header">Header</option>
-                <option value="query">Query</option>
-              </select>
-            </template>
+            <div class="flex gap-2">
+              <button
+                v-for="opt in [{v:'none',l:'无认证'},{v:'basic',l:'Basic Auth'},{v:'bearer',l:'Bearer'},{v:'apiKey',l:'API Key'}]"
+                :key="opt.v"
+                class="rounded-lg px-3 py-1 text-xs font-medium transition-all"
+                :class="store.currentRequest.auth?.authType === opt.v
+                  ? 'bg-bamboo/15 text-bamboo ring-1 ring-bamboo/30'
+                  : 'bg-paper-deep/20 text-ink-soft hover:bg-paper-deep/40 hover:text-ink'"
+                @click="store.currentRequest.auth!.authType = opt.v"
+              >{{ opt.l }}</button>
+            </div>
+            <div class="mt-3 space-y-2">
+              <template v-if="store.currentRequest.auth?.authType === 'basic'">
+                <input v-model="store.currentRequest.auth!.username" placeholder="用户名"
+                  class="w-full rounded-lg border border-paper-deep/30 bg-paper-deep/15 px-3 py-1.5 text-xs text-ink outline-none transition-colors placeholder:text-ink-faint/40 focus:border-bamboo/40 font-mono" />
+                <input v-model="store.currentRequest.auth!.password" type="password" placeholder="密码"
+                  class="w-full rounded-lg border border-paper-deep/30 bg-paper-deep/15 px-3 py-1.5 text-xs text-ink outline-none transition-colors placeholder:text-ink-faint/40 focus:border-bamboo/40 font-mono" />
+              </template>
+              <template v-if="store.currentRequest.auth?.authType === 'bearer'">
+                <input v-model="store.currentRequest.auth!.token" placeholder="输入 Token"
+                  class="w-full rounded-lg border border-paper-deep/30 bg-paper-deep/15 px-3 py-1.5 text-xs text-ink outline-none transition-colors placeholder:text-ink-faint/40 focus:border-bamboo/40 font-mono" />
+              </template>
+              <template v-if="store.currentRequest.auth?.authType === 'apiKey'">
+                <input v-model="store.currentRequest.auth!.apiKeyName" placeholder="Key 名称"
+                  class="w-full rounded-lg border border-paper-deep/30 bg-paper-deep/15 px-3 py-1.5 text-xs text-ink outline-none transition-colors placeholder:text-ink-faint/40 focus:border-bamboo/40 font-mono" />
+                <input v-model="store.currentRequest.auth!.apiKey" placeholder="Key 值"
+                  class="w-full rounded-lg border border-paper-deep/30 bg-paper-deep/15 px-3 py-1.5 text-xs text-ink outline-none transition-colors placeholder:text-ink-faint/40 focus:border-bamboo/40 font-mono" />
+                <div class="flex gap-2">
+                  <button
+                    v-for="loc in [{v:'header',l:'Header'},{v:'query',l:'Query'}]"
+                    :key="loc.v"
+                    class="flex-1 rounded-lg px-3 py-1 text-xs font-medium transition-all"
+                    :class="store.currentRequest.auth?.apiKeyLocation === loc.v
+                      ? 'bg-bamboo/15 text-bamboo ring-1 ring-bamboo/30'
+                      : 'bg-paper-deep/20 text-ink-soft hover:bg-paper-deep/40 hover:text-ink'"
+                    @click="store.currentRequest.auth!.apiKeyLocation = loc.v"
+                  >{{ loc.l }}</button>
+                </div>
+              </template>
+            </div>
           </div>
 
           <!-- Headers section -->

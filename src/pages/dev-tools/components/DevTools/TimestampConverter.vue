@@ -173,11 +173,16 @@ function convertDate() {
       <div v-if="mode === 'date-to-ts'" class="space-y-4">
         <div>
           <label class="mb-1.5 block text-xs font-medium text-ink-soft">日期时间</label>
-          <input
-            v-model="dateInput"
-            type="datetime-local"
-            class="w-full rounded-lg border border-paper-deep/40 bg-paper-warm/50 px-3 py-2 text-sm text-ink outline-none transition-colors placeholder:text-ink-faint/40 focus:border-bamboo/40 focus:bg-paper-warm/80"
-          />
+          <div class="relative">
+            <input
+              v-model="dateInput"
+              type="datetime-local"
+              class="w-full appearance-none rounded-lg border border-paper-deep/40 bg-paper-warm/50 px-3 py-2 text-sm text-ink outline-none transition-colors focus:border-bamboo/40 focus:bg-paper-warm/80 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-40 [&::-webkit-calendar-picker-indicator]:hover:opacity-70 [&::-webkit-calendar-picker-indicator]:transition-opacity"
+            />
+            <div class="pointer-events-none absolute inset-y-0 right-2 flex items-center text-ink-faint/50">
+              <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            </div>
+          </div>
           <p class="mt-1 text-xs text-ink-faint">也支持手动输入 ISO 8601 格式（如 2024-01-15T10:30:00）</p>
         </div>
         <Button @click="convertDate">转换为时间戳</Button>

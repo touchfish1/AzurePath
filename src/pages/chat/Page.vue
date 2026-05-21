@@ -35,6 +35,9 @@ import { sendSystemNotification } from "@/composables/useNotification";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 
+// Module-level flag: only init LAN services once per session
+let lanInitialized = false;
+
 const peers = ref<PeerInfo[]>([]);
 const messages = ref<StoredMessage[]>([]);
 const transfers = ref<FileTransfer[]>([]);
@@ -195,9 +198,10 @@ function exportChatHistory() {
 }
 
 onMounted(async () => {
-  if (!initialized.value) {
+  if (!lanInitialized) {
     try {
       await lanInit();
+      lanInitialized = true;
       initialized.value = true;
     } catch (e) {
       toast.error(`初始化局域网服务失败: ${e}`);

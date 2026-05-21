@@ -76,10 +76,13 @@ const statusConfig = computed(() => (status: string) => {
   }
 });
 
+let lanInitialized = false;
+
 onMounted(async () => {
-  if (!initialized.value) {
+  if (!lanInitialized) {
     try {
       await lanInit();
+      lanInitialized = true;
       initialized.value = true;
     } catch (e) {
       toast.error(`初始化局域网服务失败: ${e}`);
