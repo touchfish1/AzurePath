@@ -19,3 +19,5 @@ pub mod ssl_check;
 pub mod traceroute;
 pub mod whois;
 pub mod wol;
+pub mod app_settings;
+pub mod operation_history;

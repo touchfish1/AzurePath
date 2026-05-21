@@ -153,6 +153,20 @@ pub fn run() {
             // Phase 6 — Settings
             commands::settings::get_settings,
             commands::settings::save_settings,
+            commands::app_settings::settings_init,
+            commands::app_settings::settings_get,
+            commands::app_settings::settings_set,
+            commands::app_settings::settings_delete,
+            commands::app_settings::settings_get_all,
+            commands::app_settings::settings_clear,
+            // Operation History
+            commands::operation_history::history_init,
+            commands::operation_history::history_list,
+            commands::operation_history::history_get,
+            commands::operation_history::history_delete,
+            commands::operation_history::history_clear,
+            commands::operation_history::history_set_max_entries,
+            commands::operation_history::history_get_max_entries,
             // Phase 7 — Export
             commands::export::export_chat,
             commands::export::export_clipboard,
