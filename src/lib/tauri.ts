@@ -1027,6 +1027,7 @@ export interface ApiRequest {
   headers: string[][];
   body: string | null;
   bodyType: string | null;
+  auth?: AuthConfig | null;
 }
 
 export interface ApiResponse {
@@ -1060,6 +1061,111 @@ export function saveApiRequest(id: string | null, name: string, request: ApiRequ
 
 export function deleteApiRequest(id: string): Promise<void> {
   return invoke("delete_api_request", { id });
+}
+
+// ── WebSocket ──
+
+export interface WsMessage {
+  id: string;
+  direction: string;
+  content: string;
+  timestamp: string;
+}
+
+export function wsConnect(url: string): Promise<void> {
+  return invoke("ws_connect", { url });
+}
+
+export function wsSend(message: string): Promise<void> {
+  return invoke("ws_send", { message });
+}
+
+export function wsClose(): Promise<void> {
+  return invoke("ws_close");
+}
+
+export function wsGetMessages(): Promise<WsMessage[]> {
+  return invoke("ws_get_messages");
+}
+
+export function wsClearMessages(): Promise<void> {
+  return invoke("ws_clear_messages");
+}
+
+export function onWsMessage(cb: (payload: WsMessage) => void): Promise<UnlistenFn> {
+  return listen<WsMessage>("ws:message", (event) => cb(event.payload));
+}
+
+export function onWsConnected(cb: (payload: { url: string }) => void): Promise<UnlistenFn> {
+  return listen("ws:connected", (event) => cb(event.payload as any));
+}
+
+export function onWsDisconnected(cb: (payload: { code: number; reason: string }) => void): Promise<UnlistenFn> {
+  return listen("ws:disconnected", (event) => cb(event.payload as any));
+}
+
+// ── Environment ──
+
+export interface Environment {
+  id: string;
+  name: string;
+  variables: string[][];
+}
+
+export function envList(): Promise<Environment[]> {
+  return invoke("env_list");
+}
+
+export function envSave(environment: Environment): Promise<Environment> {
+  return invoke("env_save", { environment });
+}
+
+export function envDelete(id: string): Promise<void> {
+  return invoke("env_delete", { id });
+}
+
+// ── Collections ──
+
+export interface CollectionItem {
+  id: string;
+  name: string;
+  request: any;
+}
+
+export interface RequestCollection {
+  id: string;
+  name: string;
+  requests: CollectionItem[];
+}
+
+export function collectionList(): Promise<RequestCollection[]> {
+  return invoke("collection_list");
+}
+
+export function collectionSave(name: string, id: string | null, requests: CollectionItem[]): Promise<RequestCollection> {
+  return invoke("collection_save", { name, id, requests });
+}
+
+export function collectionDelete(id: string): Promise<void> {
+  return invoke("collection_delete", { id });
+}
+
+// ── Code Generation ──
+
+export function generateHttpCode(method: string, url: string, headers: string[][], body: string | null, bodyType: string | null, lang: string): Promise<string> {
+  return invoke("generate_http_code", { method, url, headers, body, bodyType, lang });
+}
+
+// ── Auth Config ──
+
+export interface AuthConfig {
+  authType: string;
+  username: string | null;
+  password: string | null;
+  token: string | null;
+  apiKey: string | null;
+  apiKeyName: string | null;
+  apiKeyLocation: string | null;
 }
 
 // ============================================================
