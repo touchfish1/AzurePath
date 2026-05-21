@@ -1420,3 +1420,102 @@ export function remoteShellRedisSetValue(connId: string, key: string, value: str
 export function remoteShellRedisSetTtl(connId: string, key: string, ttl: number): Promise<void> {
   return invoke<void>("remote_shell_redis_set_ttl", { connId, key, ttl });
 }
+
+// ============================================================
+// Remote Desktop — VNC
+// ============================================================
+
+export interface DesktopSession {
+  id: string;
+  name: string;
+  protocol: "rdp" | "vnc";
+  host: string;
+  port: number;
+  username: string;
+  quality: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DesktopSessionInput {
+  name: string;
+  protocol: "rdp" | "vnc";
+  host: string;
+  port: number;
+  username: string;
+  quality?: number;
+}
+
+export interface DesktopFrame {
+  sessionId: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  data: number[];
+  encoding: string;
+}
+
+export interface MouseEvent {
+  x: number;
+  y: number;
+  button: number;
+  pressed: boolean;
+}
+
+export interface KeyEvent {
+  keyCode: number;
+  pressed: boolean;
+}
+
+export function rdListSessions(): Promise<DesktopSession[]> {
+  return invoke<DesktopSession[]>("rd_list_sessions");
+}
+
+export function rdCreateSession(input: DesktopSessionInput, password: string): Promise<DesktopSession> {
+  return invoke<DesktopSession>("rd_create_session", { input, password });
+}
+
+export function rdUpdateSession(id: string, input: DesktopSessionInput): Promise<DesktopSession> {
+  return invoke<DesktopSession>("rd_update_session", { id, input });
+}
+
+export function rdDeleteSession(id: string): Promise<void> {
+  return invoke<void>("rd_delete_session", { id });
+}
+
+export function rdConnect(sessionId: string, password: string): Promise<void> {
+  return invoke<void>("rd_connect", { sessionId, password });
+}
+
+export function rdDisconnect(sessionId: string): Promise<void> {
+  return invoke<void>("rd_disconnect", { sessionId });
+}
+
+export function rdResize(sessionId: string, width: number, height: number): Promise<void> {
+  return invoke<void>("rd_resize", { sessionId, width, height });
+}
+
+export function rdSendKey(sessionId: string, event: KeyEvent): Promise<void> {
+  return invoke<void>("rd_send_key", { sessionId, event });
+}
+
+export function rdSendMouse(sessionId: string, event: MouseEvent): Promise<void> {
+  return invoke<void>("rd_send_mouse", { sessionId, event });
+}
+
+export function onRdFrame(cb: (frame: DesktopFrame) => void): Promise<UnlistenFn> {
+  return listen<DesktopFrame>("rd:frame", (event) => cb(event.payload));
+}
+
+// ── System Info ──
+
+export interface LocalNetworkInfo {
+  ipv4: string[];
+  ipv6: string[];
+  hostname: string;
+}
+
+export function getLocalNetworkInfo(): Promise<LocalNetworkInfo> {
+  return invoke<LocalNetworkInfo>("get_local_network_info");
+}

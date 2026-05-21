@@ -32,5 +32,7 @@ pub mod traceroute;
 pub mod whois;
 pub mod wol;
 pub mod remote_shell;
+pub mod remote_desktop;
 pub mod app_settings;
 pub mod operation_history;
+pub mod system_info;

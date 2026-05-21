@@ -28,6 +28,11 @@ const routes: RouteRecordRaw[] = [
     component: () => import("@/pages/remote-shell/Page.vue"),
   },
   {
+    path: "/remote-desktop",
+    name: "remote-desktop",
+    component: () => import("@/pages/remote-desktop/Page.vue"),
+  },
+  {
     path: "/databases",
     name: "databases",
     component: () => import("@/pages/remote-shell/databases/Page.vue"),

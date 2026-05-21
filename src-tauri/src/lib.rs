@@ -36,6 +36,10 @@ pub fn run() {
             if let Err(e) = tauri::async_runtime::block_on(commands::remote_shell::remote_shell_init()) {
                 eprintln!("[azurepath] remote_shell init warning: {e}");
             }
+            // Initialize remote desktop store
+            if let Err(e) = tauri::async_runtime::block_on(commands::remote_desktop::remote_desktop_init()) {
+                eprintln!("[azurepath] remote_desktop init warning: {e}");
+            }
 
             use tauri::menu::{MenuBuilder, MenuItemBuilder};
             use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -273,6 +277,18 @@ pub fn run() {
             commands::remote_shell::remote_shell_redis_get_value,
             commands::remote_shell::remote_shell_redis_set_value,
             commands::remote_shell::remote_shell_redis_set_ttl,
+            // Remote Desktop
+            commands::remote_desktop::rd_list_sessions,
+            commands::remote_desktop::rd_create_session,
+            commands::remote_desktop::rd_update_session,
+            commands::remote_desktop::rd_delete_session,
+            commands::remote_desktop::rd_connect,
+            commands::remote_desktop::rd_disconnect,
+            commands::remote_desktop::rd_resize,
+            commands::remote_desktop::rd_send_key,
+            commands::remote_desktop::rd_send_mouse,
+            // System Info
+            commands::system_info::get_local_network_info,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
