@@ -1535,3 +1535,91 @@ export function rdPushClipboard(sessionId: string, text: string): Promise<void> 
 export function onRdClipboard(cb: (text: string) => void): Promise<UnlistenFn> {
   return listen<string>("rd:clipboard", (event) => cb(event.payload));
 }
+
+// ── SNMP Network Management ──
+
+export interface SnmpDevice {
+  id: string;
+  ip: string;
+  hostname: string;
+  sysDescr: string;
+  sysObjectId: string;
+  vendor: string;
+  model: string;
+  uptime: number;
+  community: string;
+  lastSeen: string;
+}
+
+export interface SnmpInterface {
+  index: number;
+  name: string;
+  description: string;
+  mac: string;
+  ip: string;
+  speed: number;
+  adminStatus: number;
+  operStatus: number;
+}
+
+export interface SnmpSample {
+  deviceId: string;
+  timestamp: string;
+  ifIndex: number;
+  inBps: number;
+  outBps: number;
+}
+
+export interface SnmpArpEntry {
+  ip: string;
+  mac: string;
+  interface: string;
+}
+
+export interface SnmpDiscoverProgress {
+  scanned: number;
+  total: number;
+  found: number;
+  currentIp: string;
+}
+
+export function snmpDiscover(cidr: string, community: string): Promise<SnmpDevice[]> {
+  return invoke<SnmpDevice[]>("snmp_discover", { cidr, community });
+}
+
+export function snmpListDevices(): Promise<SnmpDevice[]> {
+  return invoke<SnmpDevice[]>("snmp_list_devices");
+}
+
+export function snmpDeleteDevice(id: string): Promise<void> {
+  return invoke<void>("snmp_delete_device", { id });
+}
+
+export function snmpGetInterfaces(host: string, community: string): Promise<SnmpInterface[]> {
+  return invoke<SnmpInterface[]>("snmp_get_interfaces", { host, community });
+}
+
+export function snmpGetArpTable(host: string, community: string): Promise<SnmpArpEntry[]> {
+  return invoke<SnmpArpEntry[]>("snmp_get_arp_table", { host, community });
+}
+
+export function snmpGetHistory(deviceId: string, limit?: number): Promise<SnmpSample[]> {
+  return invoke<SnmpSample[]>("snmp_get_history", { deviceId, limit });
+}
+
+export function snmpStartCollect(host: string, community: string, intervalSecs?: number): Promise<void> {
+  return invoke<void>("snmp_start_collect", { host, community, intervalSecs });
+}
+
+export function snmpStopCollect(host: string): Promise<void> {
+  return invoke<void>("snmp_stop_collect", { host });
+}
+
+// Event listeners
+export function onSnmpProgress(callback: (progress: SnmpDiscoverProgress) => void): Promise<UnlistenFn> {
+  return listen<SnmpDiscoverProgress>("snmp:progress", (event) => callback(event.payload));
+}
+
+export function onSnmpSample(callback: (sample: SnmpSample) => void): Promise<UnlistenFn> {
+  return listen<SnmpSample>("snmp:sample", (event) => callback(event.payload));
+}
