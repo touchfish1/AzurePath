@@ -30,7 +30,7 @@ pub fn generate_curl(req: &CodegenRequest) -> String {
 }
 
 pub fn generate_javascript(req: &CodegenRequest) -> String {
-    let mut indent = "  ";
+    let indent = "  ";
     let mut lines = vec![format!("fetch('{}', {{", req.url)];
 
     lines.push(format!("{}method: '{}',", indent, req.method));

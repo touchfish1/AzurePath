@@ -4,9 +4,6 @@ import {
   Send,
   Plus,
   Trash2,
-  Save,
-  FolderOpen,
-  X,
   Copy,
   Check,
   ChevronDown,
@@ -17,7 +14,6 @@ import { useApiTestStore } from "@/stores/apiTest";
 
 const store = useApiTestStore();
 
-const showSavedList = ref(false);
 const bodyCopied = ref(false);
 const showHeaders = ref(true);
 const wsInput = ref("");
@@ -68,14 +64,6 @@ function formatBodySize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function loadAndSelect(id: string) {
-  const item = store.savedRequests.find((r) => r.id === id);
-  if (item) {
-    store.loadRequest(item);
-    showSavedList.value = false;
-  }
-}
-
 async function sendWsMessage() {
   if (!wsInput.value.trim()) return;
   await store.wsSendAction(wsInput.value);
@@ -109,7 +97,7 @@ onMounted(() => {
           :class="store.activeTab === tab.k
             ? 'bg-bamboo/15 text-bamboo'
             : 'text-ink-faint hover:text-ink hover:bg-paper-deep/30'"
-          @click="store.activeTab = tab.k"
+          @click="store.activeTab = tab.k as 'http' | 'websocket'"
         >{{ tab.l }}</button>
       </div>
 

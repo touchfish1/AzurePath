@@ -363,11 +363,16 @@ pub fn collection_save(
     let mut guard = COLLECTIONS.lock().map_err(|e| e.to_string())?;
 
     if let Some(existing_id) = id {
-        if let Some(existing) = guard.iter_mut().find(|c| c.id == existing_id) {
-            existing.name = name;
-            existing.requests = requests;
+        let found = guard.iter().position(|c| c.id == existing_id);
+        if let Some(idx) = found {
+            let collection = RequestCollection {
+                id: existing_id,
+                name,
+                requests: requests.clone(),
+            };
+            guard[idx] = collection.clone();
             save_collections_to_disk(&guard)?;
-            return Ok(existing.clone());
+            return Ok(collection);
         }
         return Err("Collection not found".to_string());
     }
