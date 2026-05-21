@@ -12,7 +12,6 @@ const community = ref("public");
 const selectedDevice = ref<SnmpDevice | null>(null);
 const activeTab = ref<"interfaces" | "arp" | "traffic">("interfaces");
 const isScanning = ref(false);
-const intervalSecs = ref(10);
 
 onMounted(() => {
   store.loadDevices();

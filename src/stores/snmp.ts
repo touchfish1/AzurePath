@@ -1,12 +1,12 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
+import type { UnlistenFn } from "@tauri-apps/api/event";
 import {
   snmpDiscover,
   snmpListDevices,
   snmpDeleteDevice,
   snmpGetInterfaces,
   snmpGetArpTable,
-  snmpGetHistory,
   snmpStartCollect,
   snmpStopCollect,
   onSnmpProgress,
@@ -26,6 +26,7 @@ export const useSnmpStore = defineStore("snmp", () => {
   const discoverProgress = ref<SnmpDiscoverProgress | null>(null);
   const isLoading = ref(false);
   const isCollecting = ref(false);
+  let sampleUnlisten: UnlistenFn | null = null;
 
   async function loadDevices() {
     isLoading.value = true;
@@ -65,7 +66,7 @@ export const useSnmpStore = defineStore("snmp", () => {
 
   async function startCollection(host: string, community: string) {
     isCollecting.value = true;
-    const unlisten = await onSnmpSample((sample) => {
+    sampleUnlisten = await onSnmpSample((sample) => {
       samples.value.push(sample);
       if (samples.value.length > 1000) {
         samples.value = samples.value.slice(-500);
@@ -76,6 +77,10 @@ export const useSnmpStore = defineStore("snmp", () => {
 
   async function stopCollection(host: string) {
     await snmpStopCollect(host);
+    if (sampleUnlisten) {
+      sampleUnlisten();
+      sampleUnlisten = null;
+    }
     isCollecting.value = false;
   }
 
