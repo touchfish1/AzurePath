@@ -1,11 +1,15 @@
 use std::collections::HashSet;
 use std::net::Ipv4Addr;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 use tauri::AppHandle;
 
 use crate::core::ping;
+use crate::core::topology::layout::{self, LayoutAlgorithm};
+use crate::core::topology::store::TopologyStore;
 use crate::core::utils::emit_or_warn;
+use crate::types::topology::{SnapshotDetail, SnapshotDiff, TopologyLink, TopologyNode, TopologySnapshot};
 
 // ============================================================
 // Data types
@@ -61,6 +65,24 @@ fn is_cancelled() -> bool {
     } else {
         false
     }
+}
+
+// ============================================================
+// Topology Store (snapshot persistence)
+// ============================================================
+
+static TOPO_STORE: OnceLock<Arc<TopologyStore>> = OnceLock::new();
+
+fn topo_store() -> &'static Arc<TopologyStore> {
+    TOPO_STORE.get_or_init(|| {
+        Arc::new(TopologyStore::new().expect("Failed to init topology store"))
+    })
+}
+
+#[tauri::command]
+pub async fn topology_init() -> Result<(), String> {
+    let _ = topo_store();
+    Ok(())
 }
 
 // ============================================================
@@ -402,6 +424,55 @@ async fn run_discovery(
 pub fn cancel_topology_discovery() -> Result<(), String> {
     set_cancel_flag(true);
     Ok(())
+}
+
+// ── Layout Commands ──
+
+#[tauri::command]
+pub fn compute_topology_layout(
+    nodes: Vec<TopologyNode>,
+    links: Vec<(String, String)>,
+    algorithm: String,
+    width: f64,
+    height: f64,
+) -> Vec<TopologyNode> {
+    let mut result = nodes;
+    let algo = LayoutAlgorithm::from_str(&algorithm);
+    let link_pairs: Vec<(String, String)> = links.into_iter().collect();
+    layout::compute_layout(&mut result, &link_pairs, &algo, width, height);
+    result
+}
+
+// ── Snapshot Commands ──
+
+#[tauri::command]
+pub fn topology_save_snapshot(
+    name: String,
+    layout_algorithm: String,
+    nodes: Vec<TopologyNode>,
+    links: Vec<TopologyLink>,
+) -> Result<String, String> {
+    topo_store().save_snapshot(&name, &layout_algorithm, &nodes, &links)
+}
+
+#[tauri::command]
+pub fn topology_list_snapshots() -> Result<Vec<TopologySnapshot>, String> {
+    topo_store().list_snapshots()
+}
+
+#[tauri::command]
+pub fn topology_load_snapshot(id: String) -> Result<SnapshotDetail, String> {
+    topo_store().load_snapshot(&id)
+}
+
+#[tauri::command]
+pub fn topology_delete_snapshot(id: String) -> Result<(), String> {
+    topo_store().delete_snapshot(&id)
+}
+
+#[tauri::command]
+pub fn topology_compare_snapshots(id_a: String, id_b: String) -> Result<SnapshotDiff, String> {
+    topo_store().compare_snapshots(&id_a, &id_b)
 }
 
 #[cfg(test)]

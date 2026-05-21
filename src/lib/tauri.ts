@@ -1017,6 +1017,101 @@ export function onTopologyError(
   );
 }
 
+// ── Enhanced Topology Types ──
+
+export interface TopoInterfaceInfo {
+  index: number;
+  name: string;
+  mac: string;
+  speed: number;
+  operStatus: number;
+}
+
+export interface TopologyNode {
+  id: string;
+  ip: string;
+  hostname: string;
+  deviceType: string;
+  vendor: string;
+  model: string;
+  os: string;
+  cpuUsage: number | null;
+  memoryUsage: number | null;
+  status: string;
+  x: number;
+  y: number;
+  groupId: string | null;
+  mac: string;
+  interfaces: TopoInterfaceInfo[];
+}
+
+export interface TopologyLink {
+  id: string;
+  sourceId: string;
+  targetId: string;
+  linkType: string;
+  speed: number | null;
+  latencyMs: number | null;
+  bandwidthUsage: number | null;
+  sourceIface: string | null;
+  targetIface: string | null;
+}
+
+export interface TopologySnapshot {
+  id: string;
+  name: string;
+  createdAt: string;
+}
+
+export interface SnapshotDetail {
+  id: string;
+  name: string;
+  layoutAlgorithm: string;
+  createdAt: string;
+  nodes: TopologyNode[];
+  links: TopologyLink[];
+}
+
+export interface SnapshotDiff {
+  addedNodes: string[];
+  removedNodes: string[];
+  changedNodes: string[];
+}
+
+// ── Layout ──
+
+export function computeTopologyLayout(
+  nodes: TopologyNode[],
+  links: [string, string][],
+  algorithm: string,
+  width: number,
+  height: number,
+): Promise<TopologyNode[]> {
+  return invoke<TopologyNode[]>("compute_topology_layout", { nodes, links, algorithm, width, height });
+}
+
+// ── Snapshots ──
+
+export function topologySaveSnapshot(name: string, layoutAlgorithm: string, nodes: TopologyNode[], links: TopologyLink[]): Promise<string> {
+  return invoke<string>("topology_save_snapshot", { name, layoutAlgorithm, nodes, links });
+}
+
+export function topologyListSnapshots(): Promise<TopologySnapshot[]> {
+  return invoke<TopologySnapshot[]>("topology_list_snapshots");
+}
+
+export function topologyLoadSnapshot(id: string): Promise<SnapshotDetail> {
+  return invoke<SnapshotDetail>("topology_load_snapshot", { id });
+}
+
+export function topologyDeleteSnapshot(id: string): Promise<void> {
+  return invoke<void>("topology_delete_snapshot", { id });
+}
+
+export function topologyCompareSnapshots(idA: string, idB: string): Promise<SnapshotDiff> {
+  return invoke<SnapshotDiff>("topology_compare_snapshots", { idA, idB });
+}
+
 // ============================================================
 // API Test Tool
 // ============================================================

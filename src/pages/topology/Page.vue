@@ -14,9 +14,12 @@ import {
   type DiscoverProgress,
   type TopologyResult,
 } from "@/lib/tauri";
+import { useTopologyStore } from "@/stores/topology";
+import type { TopologyLink } from "@/lib/tauri";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
 const router = useRouter();
+const topoStore = useTopologyStore();
 
 // ============= Topology State =============
 const canvasRef = ref<HTMLCanvasElement | null>(null);
@@ -51,6 +54,16 @@ let unlistenDiscoverProgress: UnlistenFn | null = null;
 let unlistenDiscoverResult: UnlistenFn | null = null;
 let unlistenDiscoverError: UnlistenFn | null = null;
 
+// ============= Enhanced Features =============
+const showSnapshotPanel = ref(false);
+const snapshotName = ref("");
+const algorithmOptions = [
+  { value: "forceDirected", label: "力导向布局" },
+  { value: "hierarchical", label: "层级布局" },
+  { value: "circular", label: "环形布局" },
+  { value: "grid", label: "网格布局" },
+];
+
 // ============= Force-directed Layout =============
 function initNodes() {
   const centerX = canvasWidth / 2;
@@ -66,6 +79,31 @@ function initNodes() {
       peer,
     };
   });
+  // Sync to store
+  topoStore.nodes = nodes.value.map((n) => ({
+    id: n.peer.id,
+    ip: n.peer.ip,
+    hostname: n.peer.hostname || n.peer.ip,
+    deviceType: n.peer.os === "__discovered__" ? "other" : detectDeviceType(n.peer.ip),
+    vendor: "",
+    model: "",
+    os: n.peer.os === "__discovered__" ? "" : n.peer.os,
+    cpuUsage: null,
+    memoryUsage: null,
+    status: n.peer.status === "online" ? "online" : "offline",
+    x: n.x,
+    y: n.y,
+    groupId: null,
+    mac: "",
+    interfaces: [],
+  }));
+}
+
+function detectDeviceType(ip: string): string {
+  const last = parseInt(ip.split(".")[3] || "0");
+  if (last === 1 || last === 254) return "router";
+  if (last >= 2 && last <= 10) return "switch";
+  return "other";
 }
 
 function simulateForces() {
@@ -206,53 +244,110 @@ function draw() {
   // Draw nodes
   for (const node of nodes.value) {
     const { x, y } = node;
+    const topoNode = topoStore.nodes.find((n) => n.id === node.peer.id || n.ip === node.peer.ip);
     const isSelected = selectedPeer.value?.ip === node.peer.ip;
     const isDiscovered = node.peer.os === "__discovered__";
+    const isFilteredOut = topoStore.searchQuery && !topoStore.filteredNodes.find((n) => n.id === node.peer.id);
 
-    // Outer glow for selected
-    if (isSelected) {
-      ctx.beginPath();
-      ctx.arc(x, y, 28, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(34, 197, 94, 0.15)";
-      ctx.fill();
+    if (isFilteredOut) {
+      ctx.globalAlpha = 0.15;
     }
 
-    // Main circle
-    ctx.beginPath();
-    ctx.arc(x, y, 22, 0, Math.PI * 2);
-    ctx.fillStyle = isSelected ? "#22c55e" : isDiscovered ? "#3b82f6" : colors.nodeFill;
+    // Status ring (outer circle showing CPU/memory health)
+    if (topoNode?.cpuUsage !== null && topoNode !== undefined) {
+      ctx.beginPath();
+      ctx.arc(x, y, 26, 0, Math.PI * 2);
+      ctx.strokeStyle = topoNode.cpuUsage! > 80 ? "#ef4444" : topoNode.cpuUsage! > 50 ? "#f59e0b" : "#22c55e";
+      ctx.lineWidth = 3;
+      ctx.stroke();
+    }
+
+    // Device-type-specific shape
+    const shape = getDeviceShape(topoNode?.deviceType || "other");
+
+    if (shape === "diamond") {
+      // Router: diamond
+      ctx.beginPath();
+      ctx.moveTo(x, y - 22);
+      ctx.lineTo(x + 22, y);
+      ctx.lineTo(x, y + 22);
+      ctx.lineTo(x - 22, y);
+      ctx.closePath();
+    } else if (shape === "roundedRect") {
+      // Switch: rounded rectangle
+      const r = 6;
+      const w = 36;
+      const h = 26;
+      ctx.beginPath();
+      ctx.moveTo(x - w/2 + r, y - h/2);
+      ctx.lineTo(x + w/2 - r, y - h/2);
+      ctx.quadraticCurveTo(x + w/2, y - h/2, x + w/2, y - h/2 + r);
+      ctx.lineTo(x + w/2, y + h/2 - r);
+      ctx.quadraticCurveTo(x + w/2, y + h/2, x + w/2 - r, y + h/2);
+      ctx.lineTo(x - w/2 + r, y + h/2);
+      ctx.quadraticCurveTo(x - w/2, y + h/2, x - w/2, y + h/2 - r);
+      ctx.lineTo(x - w/2, y - h/2 + r);
+      ctx.quadraticCurveTo(x - w/2, y - h/2, x - w/2 + r, y - h/2);
+      ctx.closePath();
+    } else {
+      // Server/Other: circle (default)
+      ctx.beginPath();
+      ctx.arc(x, y, 22, 0, Math.PI * 2);
+    }
+
+    ctx.fillStyle = getDeviceColor(topoNode?.deviceType || "other", isSelected, isDiscovered);
     ctx.fill();
 
-    // Border for discovered nodes
-    if (isDiscovered && !isSelected) {
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.3)";
+    // Border for discovered/selected
+    if (isSelected) {
+      ctx.strokeStyle = "#22c55e";
+      ctx.lineWidth = 3;
+      ctx.stroke();
+    } else if (isDiscovered) {
+      ctx.strokeStyle = "rgba(59, 130, 246, 0.5)";
       ctx.lineWidth = 2;
       ctx.setLineDash([3, 3]);
       ctx.stroke();
       ctx.setLineDash([]);
     }
 
-    // Inner highlight
-    ctx.beginPath();
-    ctx.arc(x - 4, y - 4, 8, 0, Math.PI * 2);
-    ctx.fillStyle = isSelected
-      ? "rgba(255,255,255,0.3)"
-      : "rgba(255,255,255,0.1)";
-    ctx.fill();
-
-    // Label
+    // Labels
     ctx.fillStyle = colors.labelColor;
     ctx.font = "10px monospace";
     ctx.textAlign = "center";
     const label = node.peer.hostname || node.peer.ip;
     ctx.fillText(label.length > 14 ? label.slice(0, 14) + "..." : label, x, y + 38);
 
-    // OS / type label
-    if (node.peer.os) {
+    // Type label
+    const typeLabel = topoNode?.deviceType || (isDiscovered ? "ping" : node.peer.os);
+    if (typeLabel) {
       ctx.fillStyle = colors.inkSoft + "99";
       ctx.font = "8px sans-serif";
-      const osLabel = isDiscovered ? "Ping 发现" : node.peer.os;
-      ctx.fillText(osLabel, x, y + 50);
+      ctx.fillText(typeLabel, x, y + 50);
+    }
+
+    ctx.globalAlpha = 1;
+  }
+
+  function getDeviceShape(deviceType: string): string {
+    switch (deviceType) {
+      case "router": case "firewall": return "diamond";
+      case "switch": case "ap": return "roundedRect";
+      default: return "circle";
+    }
+  }
+
+  function getDeviceColor(deviceType: string, isSelected: boolean, isDiscovered: boolean): string {
+    if (isSelected) return "#22c55e";
+    if (isDiscovered) return "#3b82f6";
+    switch (deviceType) {
+      case "router": return "#7c3aed";   // purple
+      case "switch": return "#0891b2";   // cyan
+      case "firewall": return "#dc2626";  // red
+      case "server": return "#2563eb";   // blue
+      case "camera": return "#059669";   // green
+      case "printer": return "#d97706";  // amber
+      default: return "#475569";         // slate
     }
   }
 
@@ -359,6 +454,92 @@ function handlePeerOffline(payload: { id: string }) {
   }
 }
 
+// ============= Layout Switching & Snapshots =============
+async function switchLayout(algo: string) {
+  topoStore.layoutAlgorithm = algo;
+  await topoStore.computeLayout();
+  // Sync back to canvas nodes
+  for (const topoNode of topoStore.nodes) {
+    const canvasNode = nodes.value.find((n) => n.peer.id === topoNode.id || n.peer.ip === topoNode.ip);
+    if (canvasNode) {
+      canvasNode.x = topoNode.x;
+      canvasNode.y = topoNode.y;
+    }
+  }
+}
+
+async function saveCurrentSnapshot() {
+  if (!snapshotName.value) return;
+  // Build links from subnet and discovered links
+  const topoNodes = topoStore.nodes.map((n) => ({
+    ...n,
+    interfaces: [],
+  }));
+  const linkPairs: TopologyLink[] = [];
+  const subnets = getSubnets();
+  const ipToId = new Map(topoNodes.map((n) => [n.ip, n.id]));
+  for (const [, subnetPeers] of subnets) {
+    for (let i = 0; i < subnetPeers.length; i++) {
+      for (let j = i + 1; j < subnetPeers.length; j++) {
+        const srcId = ipToId.get(subnetPeers[i].ip);
+        const tgtId = ipToId.get(subnetPeers[j].ip);
+        if (srcId && tgtId) {
+          linkPairs.push({
+            id: `${srcId}-${tgtId}`,
+            sourceId: srcId,
+            targetId: tgtId,
+            linkType: "wired",
+            speed: null,
+            latencyMs: null,
+            bandwidthUsage: null,
+            sourceIface: null,
+            targetIface: null,
+          });
+        }
+      }
+    }
+  }
+  for (const link of discoveredLinks.value) {
+    const srcId = ipToId.get(link.source);
+    const tgtId = ipToId.get(link.target);
+    if (srcId && tgtId) {
+      linkPairs.push({
+        id: `disc-${srcId}-${tgtId}`,
+        sourceId: srcId,
+        targetId: tgtId,
+        linkType: "wired",
+        speed: null,
+        latencyMs: link.latencyMs,
+        bandwidthUsage: null,
+        sourceIface: null,
+        targetIface: null,
+      });
+    }
+  }
+  try {
+    const id = await topoStore.saveSnapshot(snapshotName.value);
+    snapshotName.value = "";
+    alert(`拓扑快照已保存: ${id.slice(0, 8)}`);
+  } catch (e: any) {
+    alert(`保存失败: ${String(e)}`);
+  }
+}
+
+async function loadSnapshotById(snapshotId: string) {
+  await topoStore.loadSnapshot(snapshotId);
+  // Sync back to canvas peers
+  peers.value = topoStore.nodes.map((n) => ({
+    id: n.id,
+    hostname: n.hostname,
+    ip: n.ip,
+    os: n.os || n.deviceType,
+    listen_port: 0,
+    last_seen: new Date().toISOString(),
+    status: n.status === "online" ? "online" : "offline",
+  }));
+  initNodes();
+}
+
 // ============= Auto Discovery =============
 async function startDiscovery() {
   discovering.value = true;
@@ -417,6 +598,7 @@ onMounted(async () => {
   unlistenDiscoverResult = await onTopologyResult(handleDiscoverResult);
   unlistenDiscoverError = await onTopologyError(handleDiscoverError);
   await loadPeers();
+  topoStore.loadSnapshots();
 
   // Start animation loop
   await nextTick();
@@ -507,6 +689,95 @@ onUnmounted(() => {
             </template>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- Search & Controls Bar -->
+    <div class="shrink-0 px-6 pb-2">
+      <div class="mt-1 flex items-center gap-2">
+        <!-- Search -->
+        <div class="relative flex-1">
+          <input
+            v-model="topoStore.searchQuery"
+            type="text"
+            placeholder="搜索 IP / 主机名 / 厂商..."
+            class="w-full rounded-lg border border-paper-deep/60 bg-paper-deep/50 px-3 py-1.5 pl-8 text-xs text-ink outline-none transition-colors focus:border-bamboo/50"
+          />
+          <svg class="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-faint" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+        </div>
+
+        <!-- Layout selector -->
+        <select
+          v-model="topoStore.layoutAlgorithm"
+          @change="switchLayout(topoStore.layoutAlgorithm)"
+          class="rounded-lg border border-paper-deep/60 bg-paper-deep/50 px-2 py-1.5 text-xs text-ink outline-none"
+        >
+          <option v-for="algo in algorithmOptions" :key="algo.value" :value="algo.value">
+            {{ algo.label }}
+          </option>
+        </select>
+
+        <!-- Snapshot button -->
+        <button
+          class="rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
+          :class="showSnapshotPanel ? 'bg-paper-deep text-ink' : 'bg-paper-deep/30 text-ink-faint hover:bg-paper-deep/60'"
+          @click="showSnapshotPanel = !showSnapshotPanel"
+        >
+          快照
+        </button>
+      </div>
+
+      <!-- Snapshot Panel -->
+      <div v-if="showSnapshotPanel" class="mt-2 rounded-xl border border-paper-deep/60 bg-paper/90 p-3 shadow-sm backdrop-blur">
+        <div class="mb-2 flex gap-2">
+          <input
+            v-model="snapshotName"
+            type="text"
+            placeholder="快照名称"
+            class="flex-1 rounded-lg border border-paper-deep/60 bg-paper-deep/50 px-2 py-1.5 text-xs text-ink outline-none focus:border-bamboo/50"
+          />
+          <button
+            class="rounded-lg bg-bamboo px-3 py-1.5 text-xs font-medium text-white hover:bg-bamboo/90 disabled:opacity-50"
+            :disabled="!snapshotName"
+            @click="saveCurrentSnapshot"
+          >
+            保存
+          </button>
+        </div>
+        <div v-if="topoStore.snapshots.length > 0" class="mt-2 max-h-40 overflow-y-auto">
+          <div
+            v-for="snap in topoStore.snapshots"
+            :key="snap.id"
+            class="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-paper-deep/50"
+          >
+            <div>
+              <span class="text-xs text-ink">{{ snap.name }}</span>
+              <span class="ml-2 text-[10px] text-ink-faint">{{ new Date(snap.createdAt).toLocaleString() }}</span>
+            </div>
+            <div class="flex gap-1">
+              <button class="rounded px-2 py-0.5 text-[10px] text-bamboo hover:bg-bamboo/10" @click="loadSnapshotById(snap.id)">加载</button>
+              <button class="rounded px-2 py-0.5 text-[10px] text-red-500 hover:bg-red-50" @click="topoStore.deleteSnapshot(snap.id)">删除</button>
+            </div>
+          </div>
+        </div>
+        <div v-else class="py-2 text-center text-xs text-ink-faint">暂无快照</div>
+      </div>
+
+      <!-- Filter chips -->
+      <div v-if="topoStore.nodes.length > 0" class="mt-2 flex flex-wrap gap-1">
+        <button
+          v-for="type in ['router', 'switch', 'server', 'firewall', 'camera', 'other']"
+          :key="type"
+          class="rounded-full px-2 py-0.5 text-[10px] transition-colors"
+          :class="topoStore.deviceTypeFilter.includes(type)
+            ? 'bg-bamboo/20 text-bamboo'
+            : 'bg-paper-deep/30 text-ink-faint hover:bg-paper-deep/60'"
+          @click="topoStore.toggleDeviceTypeFilter(type)"
+        >
+          {{ {router:'路由器', switch:'交换机', server:'服务器', firewall:'防火墙', camera:'摄像头', other:'其他'}[type] }}
+        </button>
       </div>
     </div>
 
@@ -632,24 +903,33 @@ onUnmounted(() => {
     <div class="shrink-0 border-t border-paper-deep/30 px-6 py-2">
       <div class="flex items-center gap-4 text-xs text-ink-faint">
         <span class="flex items-center gap-1.5">
-          <span class="inline-block h-2.5 w-2.5 rounded-full bg-slate-700" />
-          设备节点
+          <span class="inline-block h-2.5 w-2.5 rounded-sm bg-purple-600" />
+          路由器
         </span>
+        <span class="flex items-center gap-1.5">
+          <span class="inline-block h-2.5 w-2.5 rounded bg-cyan-600" />
+          交换机
+        </span>
+        <span class="flex items-center gap-1.5">
+          <span class="inline-block h-2.5 w-2.5 rounded-full bg-blue-600" />
+          服务器
+        </span>
+        <span class="flex items-center gap-1.5">
+          <span class="inline-block h-2.5 w-2.5 rounded-full bg-slate-600" />
+          其他
+        </span>
+        <span class="mx-1 h-4 w-px bg-paper-deep" />
         <span class="flex items-center gap-1.5">
           <span class="inline-block h-2.5 w-2.5 rounded-full bg-blue-500" />
           自动发现节点
         </span>
         <span class="flex items-center gap-1.5">
           <span class="inline-block h-px w-6 bg-slate-400/20" />
-          同子网连接
+          子网连接
         </span>
         <span class="flex items-center gap-1.5">
           <span class="inline-block h-0.5 w-6 border-t-2 border-dashed border-blue-400/40" />
           发现连接
-        </span>
-        <span class="flex items-center gap-1.5">
-          <span class="inline-block h-2.5 w-2.5 rounded-full bg-green-500" />
-          选中节点
         </span>
         <span class="ml-auto">滚轮缩放 | 拖拽节点移动</span>
       </div>
