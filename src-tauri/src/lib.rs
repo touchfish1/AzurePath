@@ -239,6 +239,22 @@ pub fn run() {
             commands::api_test::list_api_requests,
             commands::api_test::save_api_request,
             commands::api_test::delete_api_request,
+            // API Test WebSocket
+            commands::api_test::ws_connect,
+            commands::api_test::ws_send,
+            commands::api_test::ws_close,
+            commands::api_test::ws_get_messages,
+            commands::api_test::ws_clear_messages,
+            // API Test Environment
+            commands::api_test::env_list,
+            commands::api_test::env_save,
+            commands::api_test::env_delete,
+            // API Test Collections
+            commands::api_test::collection_list,
+            commands::api_test::collection_save,
+            commands::api_test::collection_delete,
+            // API Test Code Generation
+            commands::api_test::generate_http_code,
             // Phase 18 — Backup & Restore
             commands::backup::backup_all_data,
             commands::backup::list_backups,

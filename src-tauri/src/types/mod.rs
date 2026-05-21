@@ -1,3 +1,4 @@
+pub mod api_test;
 pub mod activity;
 pub mod bandwidth;
 pub mod chat;
