@@ -14,6 +14,13 @@ AzurePath is a cross-platform desktop intranet operations toolbox built with Tau
 
 ## 功能 Features
 
+### 🖥️ 远程管理 Remote Management
+- **🖥️ 远程终端 Remote Terminal** — SSH/Telnet 多标签页终端，基于 xterm.js 实现，支持编码选择（UTF-8/GBK）、Keepalive 保活、标签克隆 / Multi-tab SSH/Telnet terminal with xterm.js, encoding support, keepalive, and session cloning
+- **📁 SFTP 文件管理** — 远程目录浏览、文本文件在线编辑保存、文件上传下载 / Remote file browsing, inline text editing, file upload/download
+- **📊 主机监控 Host Monitoring** — 实时 CPU/内存/磁盘使用率采集与可视化 / Real-time CPU, memory, and disk usage monitoring
+- **🗄️ 数据库管理 Database Management** — MySQL（库表浏览、SQL 执行、EXPLAIN）、PostgreSQL（库表浏览、SQL 执行）、Redis（Key 搜索、类型识别、Value 读写、TTL 编辑）/ MySQL table browser with SQL execution, PostgreSQL query tool, Redis key-value explorer with TTL management
+- **🌿 环境管理 Environment Management** — 多环境隔离（开发/测试/生产），连接按环境分组 / Multi-environment isolation (dev/test/prod) with connection grouping
+
 ### 🔧 网络诊断 Network Diagnostics
 - **📡 Ping** — ICMP ping 检测，支持自定义次数、间隔、超时，跨平台中英文解析 / Customizable count, interval, timeout, cross-platform bilingual parsing
 - **🗺️ Traceroute** — 路由追踪，逐跳探测途经节点 / Per-hop route tracing with Windows/Unix output parsing
@@ -165,6 +172,8 @@ src/                          # 前端源码 Frontend (Vue 3 + TypeScript)
 │   ├── wol/                  # 远程唤醒 Wake-on-LAN
 │   ├── backup/               # 备份与恢复 Backup & Restore
 │   ├── logs/                 # 日志查看 Log Viewer
+│   ├── remote-shell/         # 远程终端 Remote Terminal
+│   │   └── databases/        # 数据库管理 Database Management
 │   └── settings/             # 设置 Settings
 ├── lib/                      # 工具函数 Utilities
 │   ├── tauri.ts              # Tauri invoke/event 封装

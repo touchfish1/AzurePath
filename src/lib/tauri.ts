@@ -1155,3 +1155,268 @@ export function calculateSubnet(address: string, cidr: number): Promise<SubnetRe
 export function splitSubnet(network: string, targetPrefix: number): Promise<SubnetSplitResult> {
   return invoke<SubnetSplitResult>("split_subnet", { network, targetPrefix });
 }
+
+// ============================================================
+// Remote Shell — Session Management
+// ============================================================
+
+export interface RemoteSession {
+  id: string;
+  environment: string;
+  name: string;
+  protocol: "ssh" | "telnet";
+  host: string;
+  port: number;
+  username: string;
+  encoding: string;
+  keepaliveSecs: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SessionInput {
+  name: string;
+  protocol: "ssh" | "telnet";
+  host: string;
+  port: number;
+  username: string;
+  encoding?: string;
+  keepaliveSecs?: number;
+  environment?: string;
+}
+
+export interface SessionSummary {
+  id: string;
+  environment: string;
+  name: string;
+  protocol: "ssh" | "telnet";
+  host: string;
+  port: number;
+  username: string;
+  isConnected: boolean;
+}
+
+export function remoteShellInit(): Promise<void> {
+  return invoke<void>("remote_shell_init");
+}
+
+export function remoteShellListSessions(): Promise<RemoteSession[]> {
+  return invoke<RemoteSession[]>("remote_shell_list_sessions");
+}
+
+export function remoteShellGetSession(id: string): Promise<RemoteSession> {
+  return invoke<RemoteSession>("remote_shell_get_session", { id });
+}
+
+export function remoteShellCreateSession(input: SessionInput, password: string): Promise<RemoteSession> {
+  return invoke<RemoteSession>("remote_shell_create_session", { input, password });
+}
+
+export function remoteShellUpdateSession(id: string, input: SessionInput): Promise<RemoteSession> {
+  return invoke<RemoteSession>("remote_shell_update_session", { id, input });
+}
+
+export function remoteShellDeleteSession(id: string): Promise<void> {
+  return invoke<void>("remote_shell_delete_session", { id });
+}
+
+export function remoteShellConnect(id: string): Promise<void> {
+  return invoke<void>("remote_shell_connect", { id });
+}
+
+export function remoteShellDisconnect(id: string): Promise<void> {
+  return invoke<void>("remote_shell_disconnect", { id });
+}
+
+export function remoteShellSendInput(id: string, data: string): Promise<void> {
+  return invoke<void>("remote_shell_send_input", { id, data });
+}
+
+export function remoteShellPullOutput(id: string): Promise<string> {
+  return invoke<string>("remote_shell_pull_output", { id });
+}
+
+export function remoteShellResize(id: string, cols: number, rows: number): Promise<void> {
+  return invoke<void>("remote_shell_resize", { id, cols, rows });
+}
+
+export function remoteShellListSummaries(): Promise<SessionSummary[]> {
+  return invoke<SessionSummary[]>("remote_shell_list_summaries");
+}
+
+// ============================================================
+// Remote Shell — SFTP
+// ============================================================
+
+export interface SftpEntry {
+  name: string;
+  path: string;
+  isDir: boolean;
+  size: number;
+  mtime: number;
+}
+
+export function remoteShellListSftp(sessionId: string, path: string): Promise<SftpEntry[]> {
+  return invoke<SftpEntry[]>("remote_shell_list_sftp", { sessionId, path });
+}
+
+export function remoteShellReadSftpText(sessionId: string, path: string): Promise<{ content: string; encoding: string }> {
+  return invoke<{ content: string; encoding: string }>("remote_shell_read_sftp_text", { sessionId, path });
+}
+
+export function remoteShellSaveSftpText(sessionId: string, path: string, content: string): Promise<void> {
+  return invoke<void>("remote_shell_save_sftp_text", { sessionId, path, content });
+}
+
+// ============================================================
+// Remote Shell — Host Metrics
+// ============================================================
+
+export interface HostMetrics {
+  cpuPercent: number;
+  memoryUsedBytes: number;
+  memoryTotalBytes: number;
+  memoryPercent: number;
+  diskUsedBytes: number;
+  diskTotalBytes: number;
+  diskPercent: number;
+  collectedAt: string;
+}
+
+export function remoteShellGetMetrics(sessionId: string): Promise<HostMetrics> {
+  return invoke<HostMetrics>("remote_shell_get_metrics", { sessionId });
+}
+
+// ============================================================
+// Remote Shell — Environments
+// ============================================================
+
+export function remoteShellListEnvironments(): Promise<string[]> {
+  return invoke<string[]>("remote_shell_list_environments");
+}
+
+export function remoteShellCreateEnvironment(name: string): Promise<void> {
+  return invoke<void>("remote_shell_create_environment", { name });
+}
+
+// ============================================================
+// Remote Shell — Database Connections
+// ============================================================
+
+export interface DbConnection {
+  id: string;
+  environment: string;
+  name: string;
+  dbType: "mysql" | "postgresql" | "redis" | "zookeeper" | "etcd";
+  host: string;
+  port: number;
+  username: string;
+  defaultDatabase: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DbConnectionInput {
+  name: string;
+  dbType: "mysql" | "postgresql" | "redis" | "zookeeper" | "etcd";
+  host: string;
+  port: number;
+  username: string;
+  defaultDatabase?: string;
+  environment?: string;
+}
+
+export function remoteShellListDbConnections(dbType?: string): Promise<DbConnection[]> {
+  return invoke<DbConnection[]>("remote_shell_list_db_connections", { dbType: dbType || null });
+}
+
+export function remoteShellCreateDbConnection(input: DbConnectionInput, password: string): Promise<DbConnection> {
+  return invoke<DbConnection>("remote_shell_create_db_connection", { input, password });
+}
+
+export function remoteShellDeleteDbConnection(id: string): Promise<void> {
+  return invoke<void>("remote_shell_delete_db_connection", { id });
+}
+
+export function remoteShellTestDbConnection(id: string): Promise<string> {
+  return invoke<string>("remote_shell_test_db_connection", { id });
+}
+
+// ============================================================
+// Remote Shell — MySQL
+// ============================================================
+
+export interface MySqlColumnInfo {
+  field: string;
+  dbType: string;
+  nullable: boolean;
+  key: string;
+  default: string | null;
+  extra: string;
+}
+
+export interface MySqlQueryResult {
+  columns: string[];
+  rows: unknown[][];
+  affectedRows: number;
+  elapsedMs: number;
+}
+
+export function remoteShellMysqlListDatabases(connId: string): Promise<string[]> {
+  return invoke<string[]>("remote_shell_mysql_list_databases", { connId });
+}
+
+export function remoteShellMysqlListTables(connId: string, database: string): Promise<string[]> {
+  return invoke<string[]>("remote_shell_mysql_list_tables", { connId, database });
+}
+
+export function remoteShellMysqlDescribeTable(connId: string, database: string, table: string): Promise<MySqlColumnInfo[]> {
+  return invoke<MySqlColumnInfo[]>("remote_shell_mysql_describe_table", { connId, database, table });
+}
+
+export function remoteShellMysqlExecuteQuery(connId: string, database: string, query: string): Promise<MySqlQueryResult> {
+  return invoke<MySqlQueryResult>("remote_shell_mysql_execute_query", { connId, database, query });
+}
+
+// ============================================================
+// Remote Shell — PostgreSQL
+// ============================================================
+
+export function remoteShellPgListDatabases(connId: string): Promise<string[]> {
+  return invoke<string[]>("remote_shell_pg_list_databases", { connId });
+}
+
+export function remoteShellPgListTables(connId: string, database: string): Promise<string[]> {
+  return invoke<string[]>("remote_shell_pg_list_tables", { connId, database });
+}
+
+export function remoteShellPgExecuteQuery(connId: string, database: string, query: string): Promise<MySqlQueryResult> {
+  return invoke<MySqlQueryResult>("remote_shell_pg_execute_query", { connId, database, query });
+}
+
+// ============================================================
+// Remote Shell — Redis
+// ============================================================
+
+export interface RedisKeyEntry {
+  key: string;
+  keyType: string;
+  ttl: number;
+  size: number;
+}
+
+export function remoteShellRedisListKeys(connId: string, pattern?: string): Promise<RedisKeyEntry[]> {
+  return invoke<RedisKeyEntry[]>("remote_shell_redis_list_keys", { connId, pattern: pattern || null });
+}
+
+export function remoteShellRedisGetValue(connId: string, key: string): Promise<string> {
+  return invoke<string>("remote_shell_redis_get_value", { connId, key });
+}
+
+export function remoteShellRedisSetValue(connId: string, key: string, value: string): Promise<void> {
+  return invoke<void>("remote_shell_redis_set_value", { connId, key, value });
+}
+
+export function remoteShellRedisSetTtl(connId: string, key: string, ttl: number): Promise<void> {
+  return invoke<void>("remote_shell_redis_set_ttl", { connId, key, ttl });
+}

@@ -31,5 +31,6 @@ pub mod topology;
 pub mod traceroute;
 pub mod whois;
 pub mod wol;
+pub mod remote_shell;
 pub mod app_settings;
 pub mod operation_history;

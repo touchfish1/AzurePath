@@ -12,6 +12,13 @@
 
 ## Features
 
+### 🖥️ Remote Management
+- **🖥️ Remote Terminal** — Multi-tab SSH/Telnet terminal with xterm.js, encoding support (UTF-8/GBK), keepalive, and session cloning
+- **📁 SFTP File Manager** — Remote directory browsing, inline text editing, file upload and download
+- **📊 Host Monitoring** — Real-time CPU, memory, and disk usage monitoring with visual progress bars
+- **🗄️ Database Management** — MySQL (table browser, SQL execution, EXPLAIN), PostgreSQL (query tool), Redis (key-value explorer with TTL editing)
+- **🌿 Environment Management** — Multi-environment isolation (dev/test/prod) with connection grouping
+
 ### 🔧 Network Diagnostics
 - **📡 Ping** — ICMP ping with customizable count, interval, and timeout; cross-platform output parsing
 - **🗺️ Traceroute** — Route tracing with per-hop latency measurement; Windows/Unix output parsing

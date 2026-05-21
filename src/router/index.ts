@@ -23,6 +23,16 @@ const routes: RouteRecordRaw[] = [
     component: () => import("@/pages/mtr/index.vue"),
   },
   {
+    path: "/remote-shell",
+    name: "remote-shell",
+    component: () => import("@/pages/remote-shell/Page.vue"),
+  },
+  {
+    path: "/databases",
+    name: "databases",
+    component: () => import("@/pages/remote-shell/databases/Page.vue"),
+  },
+  {
     path: "/port-scan",
     name: "port-scan",
     component: () => import("@/pages/port-scan/Page.vue"),
@@ -126,6 +136,11 @@ const routes: RouteRecordRaw[] = [
     path: "/dev-tools",
     name: "dev-tools",
     component: () => import("@/pages/dev-tools/Page.vue"),
+  },
+  {
+    path: "/remote-shell",
+    name: "remote-shell",
+    component: () => import("@/pages/remote-shell/Page.vue"),
   },
 ];
 

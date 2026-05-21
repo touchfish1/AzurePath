@@ -32,6 +32,10 @@ pub fn run() {
         .setup(|app| {
             // Initialize activity store
             let _ = commands::history::init_activity_store();
+            // Initialize remote shell store
+            if let Err(e) = tauri::async_runtime::block_on(commands::remote_shell::remote_shell_init()) {
+                eprintln!("[azurepath] remote_shell init warning: {e}");
+            }
 
             use tauri::menu::{MenuBuilder, MenuItemBuilder};
             use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -233,6 +237,40 @@ pub fn run() {
             // Subnet Calculator
             commands::subnet::calculate_subnet,
             commands::subnet::split_subnet,
+            // Remote Shell
+            commands::remote_shell::remote_shell_init,
+            commands::remote_shell::remote_shell_list_sessions,
+            commands::remote_shell::remote_shell_get_session,
+            commands::remote_shell::remote_shell_create_session,
+            commands::remote_shell::remote_shell_update_session,
+            commands::remote_shell::remote_shell_delete_session,
+            commands::remote_shell::remote_shell_connect,
+            commands::remote_shell::remote_shell_disconnect,
+            commands::remote_shell::remote_shell_send_input,
+            commands::remote_shell::remote_shell_pull_output,
+            commands::remote_shell::remote_shell_resize,
+            commands::remote_shell::remote_shell_list_summaries,
+            commands::remote_shell::remote_shell_list_sftp,
+            commands::remote_shell::remote_shell_read_sftp_text,
+            commands::remote_shell::remote_shell_save_sftp_text,
+            commands::remote_shell::remote_shell_get_metrics,
+            commands::remote_shell::remote_shell_list_environments,
+            commands::remote_shell::remote_shell_create_environment,
+            commands::remote_shell::remote_shell_list_db_connections,
+            commands::remote_shell::remote_shell_create_db_connection,
+            commands::remote_shell::remote_shell_delete_db_connection,
+            commands::remote_shell::remote_shell_test_db_connection,
+            commands::remote_shell::remote_shell_mysql_list_databases,
+            commands::remote_shell::remote_shell_mysql_list_tables,
+            commands::remote_shell::remote_shell_mysql_describe_table,
+            commands::remote_shell::remote_shell_mysql_execute_query,
+            commands::remote_shell::remote_shell_pg_list_databases,
+            commands::remote_shell::remote_shell_pg_list_tables,
+            commands::remote_shell::remote_shell_pg_execute_query,
+            commands::remote_shell::remote_shell_redis_list_keys,
+            commands::remote_shell::remote_shell_redis_get_value,
+            commands::remote_shell::remote_shell_redis_set_value,
+            commands::remote_shell::remote_shell_redis_set_ttl,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
