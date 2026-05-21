@@ -40,6 +40,8 @@ pub fn run() {
             if let Err(e) = tauri::async_runtime::block_on(commands::remote_desktop::remote_desktop_init()) {
                 eprintln!("[azurepath] remote_desktop init warning: {e}");
             }
+            // Initialize topology store
+            let _ = commands::topology::topology_init();
 
             use tauri::menu::{MenuBuilder, MenuItemBuilder};
             use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -115,6 +117,13 @@ pub fn run() {
             commands::traceroute::traceroute_stop,
             commands::topology::discover_topology,
             commands::topology::cancel_topology_discovery,
+            // Topology enhanced commands
+            commands::topology::compute_topology_layout,
+            commands::topology::topology_save_snapshot,
+            commands::topology::topology_list_snapshots,
+            commands::topology::topology_load_snapshot,
+            commands::topology::topology_delete_snapshot,
+            commands::topology::topology_compare_snapshots,
             commands::port_scan::port_scan_start,
             commands::port_scan::port_scan_stop,
             commands::dns::dns_lookup,
