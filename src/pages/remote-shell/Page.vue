@@ -468,12 +468,12 @@ onUnmounted(() => {
               />
               <span class="truncate max-w-[100px]">{{ session.name }}</span>
               <span class="text-[10px] text-ink-faint/60">({{ session.protocol }})</span>
-              <button
-                class="ml-1 rounded p-0.5 text-ink-faint/50 opacity-0 group-hover:opacity-100 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all"
+              <span
+                class="ml-1 cursor-pointer rounded p-0.5 text-ink-faint/50 opacity-0 group-hover:opacity-100 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all"
                 @click.stop="closeTab(session.id)"
               >
                 <X class="h-3 w-3" />
-              </button>
+              </span>
             </button>
           </div>
 
