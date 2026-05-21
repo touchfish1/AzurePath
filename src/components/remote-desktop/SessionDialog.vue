@@ -23,6 +23,9 @@ const form = reactive({
   port: 5900,
   username: "",
   quality: 70,
+  desktopWidth: 1280,
+  desktopHeight: 720,
+  domain: "",
 });
 
 const password = ref("");
@@ -39,6 +42,9 @@ function resetForm() {
   form.port = 5900;
   form.username = "";
   form.quality = 70;
+  form.desktopWidth = 1280;
+  form.desktopHeight = 720;
+  form.domain = "";
   password.value = "";
   errors.value = {};
 }
@@ -50,9 +56,24 @@ function fillFromSession(session: DesktopSession) {
   form.port = session.port;
   form.username = session.username;
   form.quality = session.quality;
+  form.desktopWidth = session.desktopWidth || 1280;
+  form.desktopHeight = session.desktopHeight || 720;
+  form.domain = session.domain || "";
   password.value = "";
   errors.value = {};
 }
+
+// Auto-switch port when protocol changes
+watch(
+  () => form.protocol,
+  (protocol) => {
+    if (protocol === "rdp") {
+      form.port = 3389;
+    } else {
+      form.port = 5900;
+    }
+  },
+);
 
 watch(
   () => props.visible,
@@ -103,6 +124,13 @@ function handleSave() {
     port: form.port,
     username: form.username.trim(),
     quality: form.quality,
+    ...(form.protocol === "rdp"
+      ? {
+          desktopWidth: form.desktopWidth,
+          desktopHeight: form.desktopHeight,
+          domain: form.domain.trim() || undefined,
+        }
+      : {}),
   };
 
   const pw = password.value.trim();
@@ -273,6 +301,41 @@ function handleKeydown(e: KeyboardEvent) {
             </div>
           </div>
         </div>
+
+        <!-- RDP extra options -->
+        <template v-if="form.protocol === 'rdp'">
+          <div class="flex gap-3">
+            <div class="flex-1">
+              <label class="mb-1 block text-xs font-medium text-ink-soft">桌面宽度</label>
+              <input
+                v-model.number="form.desktopWidth"
+                type="number"
+                min="640"
+                max="7680"
+                class="w-full rounded-lg border border-paper-deep bg-paper-warm/50 px-3 py-2 text-sm text-ink outline-none transition-colors focus:border-bamboo/50 focus:ring-1 focus:ring-bamboo/20"
+              />
+            </div>
+            <div class="flex-1">
+              <label class="mb-1 block text-xs font-medium text-ink-soft">桌面高度</label>
+              <input
+                v-model.number="form.desktopHeight"
+                type="number"
+                min="480"
+                max="4320"
+                class="w-full rounded-lg border border-paper-deep bg-paper-warm/50 px-3 py-2 text-sm text-ink outline-none transition-colors focus:border-bamboo/50 focus:ring-1 focus:ring-bamboo/20"
+              />
+            </div>
+          </div>
+          <div>
+            <label class="mb-1 block text-xs font-medium text-ink-soft">域 (可选)</label>
+            <input
+              v-model="form.domain"
+              type="text"
+              placeholder="WORKGROUP"
+              class="w-full rounded-lg border border-paper-deep bg-paper-warm/50 px-3 py-2 text-sm text-ink outline-none placeholder:text-ink-faint/50 transition-colors focus:border-bamboo/50 focus:ring-1 focus:ring-bamboo/20"
+            />
+          </div>
+        </template>
 
         <!-- Actions -->
         <div class="mt-6 flex justify-end gap-2">

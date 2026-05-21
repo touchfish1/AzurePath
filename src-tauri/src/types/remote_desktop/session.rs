@@ -17,6 +17,9 @@ pub struct DesktopSession {
     pub port: u16,
     pub username: String,
     pub quality: u8,
+    pub desktop_width: u16,
+    pub desktop_height: u16,
+    pub domain: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -30,6 +33,9 @@ pub struct SessionInput {
     pub port: u16,
     pub username: String,
     pub quality: Option<u8>,
+    pub desktop_width: Option<u16>,
+    pub desktop_height: Option<u16>,
+    pub domain: Option<String>,
 }
 
 impl SessionInput {
@@ -43,6 +49,9 @@ impl SessionInput {
             port: self.port,
             username: self.username,
             quality: self.quality.unwrap_or(75),
+            desktop_width: self.desktop_width.unwrap_or(1280),
+            desktop_height: self.desktop_height.unwrap_or(720),
+            domain: self.domain,
             created_at: now.clone(),
             updated_at: now,
         }
@@ -60,4 +69,7 @@ pub struct SessionSummary {
     pub username: String,
     pub quality: u8,
     pub is_connected: bool,
+    pub desktop_width: Option<u16>,
+    pub desktop_height: Option<u16>,
+    pub domain: Option<String>,
 }

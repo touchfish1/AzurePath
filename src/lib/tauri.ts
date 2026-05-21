@@ -1433,6 +1433,9 @@ export interface DesktopSession {
   port: number;
   username: string;
   quality: number;
+  desktopWidth?: number;
+  desktopHeight?: number;
+  domain?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -1444,6 +1447,9 @@ export interface DesktopSessionInput {
   port: number;
   username: string;
   quality?: number;
+  desktopWidth?: number;
+  desktopHeight?: number;
+  domain?: string;
 }
 
 export interface DesktopFrame {
@@ -1518,4 +1524,14 @@ export interface LocalNetworkInfo {
 
 export function getLocalNetworkInfo(): Promise<LocalNetworkInfo> {
   return invoke<LocalNetworkInfo>("get_local_network_info");
+}
+
+// ── Remote Desktop Clipboard ──
+
+export function rdPushClipboard(sessionId: string, text: string): Promise<void> {
+  return invoke<void>("rd_push_clipboard", { sessionId, text });
+}
+
+export function onRdClipboard(cb: (text: string) => void): Promise<UnlistenFn> {
+  return listen<string>("rd:clipboard", (event) => cb(event.payload));
 }

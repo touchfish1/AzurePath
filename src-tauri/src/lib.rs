@@ -289,6 +289,8 @@ pub fn run() {
             commands::remote_desktop::rd_send_mouse,
             // System Info
             commands::system_info::get_local_network_info,
+            // Remote Desktop Clipboard
+            commands::remote_desktop::rd_push_clipboard,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

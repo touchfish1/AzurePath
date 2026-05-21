@@ -1,9 +1,11 @@
 <script setup lang="ts">
+import { ref } from "vue";
 import {
   ZoomIn,
   Maximize2,
   Minimize2,
   ClipboardCopy,
+  ClipboardPaste,
   Unplug,
 } from "lucide-vue-next";
 
@@ -11,6 +13,8 @@ interface Props {
   zoom: number;
   isFullscreen: boolean;
   isConnected: boolean;
+  clipboardText: string | null;
+  clipboardSupported: boolean;
 }
 
 defineProps<Props>();
@@ -19,8 +23,11 @@ const emit = defineEmits<{
   "update:zoom": [level: number];
   "toggle-fullscreen": [];
   "copy-clipboard": [];
+  "paste-clipboard": [text: string];
   disconnect: [];
 }>();
+
+const pasteText = ref("");
 
 const zoomOptions = [
   { value: 25, label: "25%" },
@@ -29,6 +36,13 @@ const zoomOptions = [
   { value: 100, label: "100%" },
   { value: -1, label: "适应" },
 ];
+
+function handlePaste() {
+  if (pasteText.value.trim()) {
+    emit("paste-clipboard", pasteText.value.trim());
+    pasteText.value = "";
+  }
+}
 </script>
 
 <template>
@@ -61,13 +75,35 @@ const zoomOptions = [
     </button>
 
     <!-- Clipboard sync -->
-    <button
-      class="rounded-lg p-1.5 text-ink-faint transition-colors hover:bg-paper-deep/50 hover:text-ink"
-      title="同步剪贴板"
-      @click="emit('copy-clipboard')"
-    >
-      <ClipboardCopy class="h-4 w-4" />
-    </button>
+    <template v-if="clipboardSupported">
+      <!-- Download clipboard from remote -->
+      <button
+        class="rounded-lg p-1.5 text-ink-faint transition-colors hover:bg-paper-deep/50 hover:text-ink"
+        :class="{ 'text-bamboo': clipboardText !== null }"
+        :title="clipboardText ? '远程剪贴板有内容' : '获取远程剪贴板'"
+        @click="emit('copy-clipboard')"
+      >
+        <ClipboardCopy class="h-4 w-4" />
+      </button>
+      <!-- Upload clipboard to remote -->
+      <div class="flex items-center gap-1">
+        <input
+          v-model="pasteText"
+          type="text"
+          placeholder="发送剪贴板内容..."
+          class="w-40 rounded-lg border border-paper-deep/60 bg-paper-warm/50 px-2 py-1 text-xs text-ink outline-none placeholder:text-ink-faint/50 transition-colors focus:border-bamboo/50"
+          @keydown.enter="handlePaste"
+        />
+        <button
+          class="rounded-lg p-1.5 text-ink-faint transition-colors hover:bg-paper-deep/50 hover:text-ink"
+          title="发送剪贴板"
+          :disabled="!pasteText.trim()"
+          @click="handlePaste"
+        >
+          <ClipboardPaste class="h-4 w-4" />
+        </button>
+      </div>
+    </template>
 
     <div class="flex-1" />
 

@@ -31,6 +31,9 @@ impl DesktopSessionStore {
                 port INTEGER NOT NULL,
                 username TEXT NOT NULL,
                 quality INTEGER NOT NULL DEFAULT 75,
+                desktop_width INTEGER NOT NULL DEFAULT 1280,
+                desktop_height INTEGER NOT NULL DEFAULT 720,
+                domain TEXT DEFAULT '',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
@@ -51,7 +54,8 @@ impl DesktopSessionStore {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn
             .prepare(
-                "SELECT id, name, protocol, host, port, username, quality, created_at, updated_at \
+                "SELECT id, name, protocol, host, port, username, quality, \
+                 desktop_width, desktop_height, domain, created_at, updated_at \
                  FROM desktop_sessions ORDER BY updated_at DESC",
             )
             .map_err(|e| e.to_string())?;
@@ -68,8 +72,11 @@ impl DesktopSessionStore {
                     port: row.get(4)?,
                     username: row.get(5)?,
                     quality: row.get(6)?,
-                    created_at: row.get(7)?,
-                    updated_at: row.get(8)?,
+                    desktop_width: row.get(7)?,
+                    desktop_height: row.get(8)?,
+                    domain: row.get(9)?,
+                    created_at: row.get(10)?,
+                    updated_at: row.get(11)?,
                 })
             })
             .map_err(|e| e.to_string())?
@@ -82,7 +89,8 @@ impl DesktopSessionStore {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn
             .prepare(
-                "SELECT id, name, protocol, host, port, username, quality, created_at, updated_at \
+                "SELECT id, name, protocol, host, port, username, quality, \
+                 desktop_width, desktop_height, domain, created_at, updated_at \
                  FROM desktop_sessions WHERE id = ?1",
             )
             .map_err(|e| e.to_string())?;
@@ -99,8 +107,11 @@ impl DesktopSessionStore {
                     port: row.get(4)?,
                     username: row.get(5)?,
                     quality: row.get(6)?,
-                    created_at: row.get(7)?,
-                    updated_at: row.get(8)?,
+                    desktop_width: row.get(7)?,
+                    desktop_height: row.get(8)?,
+                    domain: row.get(9)?,
+                    created_at: row.get(10)?,
+                    updated_at: row.get(11)?,
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -111,8 +122,9 @@ impl DesktopSessionStore {
         let session = input.into_session();
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         conn.execute(
-            "INSERT INTO desktop_sessions (id, name, protocol, host, port, username, quality, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            "INSERT INTO desktop_sessions (id, name, protocol, host, port, username, quality, \
+             desktop_width, desktop_height, domain, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 session.id,
                 session.name,
@@ -121,6 +133,9 @@ impl DesktopSessionStore {
                 session.port,
                 session.username,
                 session.quality,
+                session.desktop_width,
+                session.desktop_height,
+                session.domain,
                 session.created_at,
                 session.updated_at,
             ],
@@ -133,7 +148,8 @@ impl DesktopSessionStore {
         let now = chrono::Utc::now().to_rfc3339();
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         conn.execute(
-            "UPDATE desktop_sessions SET name=?1, protocol=?2, host=?3, port=?4, username=?5, quality=?6, updated_at=?7 WHERE id=?8",
+            "UPDATE desktop_sessions SET name=?1, protocol=?2, host=?3, port=?4, username=?5, quality=?6, \
+             desktop_width=?7, desktop_height=?8, domain=?9, updated_at=?10 WHERE id=?11",
             params![
                 input.name,
                 format!("{:?}", input.protocol).to_lowercase(),
@@ -141,6 +157,9 @@ impl DesktopSessionStore {
                 input.port,
                 input.username,
                 input.quality.unwrap_or(75),
+                input.desktop_width.unwrap_or(1280),
+                input.desktop_height.unwrap_or(720),
+                input.domain,
                 now,
                 id,
             ],

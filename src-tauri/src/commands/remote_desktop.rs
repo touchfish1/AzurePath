@@ -205,3 +205,13 @@ pub async fn rd_send_mouse(session_id: String, event: MouseEvent) -> Result<(), 
     }
     Ok(())
 }
+
+// ── Clipboard ──
+
+#[tauri::command]
+pub async fn rd_push_clipboard(session_id: String, _text: String) -> Result<(), String> {
+    // TODO: Push clipboard text to the remote session.
+    // For RDP this requires cliprdr channel support, for VNC it's ServerCutText.
+    let _ = session_id;
+    Ok(())
+}

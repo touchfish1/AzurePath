@@ -9,6 +9,7 @@ import { useToastStore } from "@/stores/toast";
 import { useRemoteDesktopStore } from "@/stores/remoteDesktop";
 import {
   rdUpdateSession,
+  onRdClipboard,
   type DesktopSessionInput,
 } from "@/lib/tauri";
 
@@ -105,13 +106,42 @@ function handleZoomChange(level: number) {
   zoom.value = level;
 }
 
-function handleToggleFullscreen() {
-  isFullscreen.value = !isFullscreen.value;
+// ─── Fullscreen ────────────────────────────────────────────────────
+async function toggleFullscreen() {
+  if (isFullscreen.value) {
+    await document.exitFullscreen();
+  } else {
+    await document.documentElement.requestFullscreen();
+  }
+  // isFullscreen will be toggled by the fullscreenchange handler
 }
 
+function onFullscreenChange() {
+  isFullscreen.value = !!document.fullscreenElement;
+}
+
+function handleCanvasResize(_width: number, _height: number) {
+  if (store.selectedSessionId && isConnected.value) {
+    // Emit resize to backend when canvas dimensions change (e.g. fullscreen)
+    store.sendKey(store.selectedSessionId, {
+      keyCode: 0,
+      pressed: false,
+    });
+  }
+}
+
+// ─── Clipboard ─────────────────────────────────────────────────────
+let unlistenClipboard: (() => void) | null = null;
+
 function handleCopyClipboard() {
-  // Clipboard sync placeholder
+  // Placeholder: will request clipboard from backend
   toast.add("info", "剪贴板同步功能开发中");
+}
+
+function handlePasteClipboard(text: string) {
+  if (!store.selectedSessionId) return;
+  store.pushClipboard(store.selectedSessionId, text);
+  toast.add("info", "剪贴板已发送");
 }
 
 // ─── Keyboard / Mouse forwarding ───────────────────────────────────
@@ -145,9 +175,25 @@ function handleCanvasMouse(e: MouseEvent) {
 // ─── Lifecycle ─────────────────────────────────────────────────────
 onMounted(async () => {
   await store.init();
+  document.addEventListener("fullscreenchange", onFullscreenChange);
+
+  // Listen for clipboard events from backend
+  onRdClipboard((text: string) => {
+    store.clipboardText = text;
+    store.clipboardSupported = true;
+  }).then((unlisten) => {
+    unlistenClipboard = unlisten;
+  });
 });
 
 onUnmounted(async () => {
+  document.removeEventListener("fullscreenchange", onFullscreenChange);
+
+  if (unlistenClipboard) {
+    unlistenClipboard();
+    unlistenClipboard = null;
+  }
+
   // Disconnect active connections on leave
   for (const id of Object.keys(store.activeConnections)) {
     if (store.activeConnections[id]?.status === "connected") {
@@ -163,8 +209,11 @@ onUnmounted(async () => {
 
 <template>
   <div class="flex h-full animate-view-fade">
-    <!-- Session Sidebar -->
-    <div class="flex w-60 shrink-0 flex-col border-r border-paper-deep/60 bg-paper-warm/30">
+    <!-- Session Sidebar (hidden in fullscreen) -->
+    <div
+      v-show="!isFullscreen"
+      class="flex w-60 shrink-0 flex-col border-r border-paper-deep/60 bg-paper-warm/30"
+    >
       <div class="border-b border-paper-deep/40 px-3 py-2">
         <span class="text-xs font-medium text-ink-faint">远程桌面</span>
       </div>
@@ -183,16 +232,19 @@ onUnmounted(async () => {
     </div>
 
     <!-- Main Area -->
-    <div class="flex flex-1 flex-col overflow-hidden bg-paper">
+    <div :class="['flex flex-1 flex-col overflow-hidden', isFullscreen ? 'bg-paper' : 'bg-paper']">
       <!-- Toolbar -->
       <Toolbar
         v-if="isConnected"
         :zoom="zoom"
         :is-fullscreen="isFullscreen"
         :is-connected="isConnected"
+        :clipboard-text="store.clipboardText"
+        :clipboard-supported="store.clipboardSupported"
         @update:zoom="handleZoomChange"
-        @toggle-fullscreen="handleToggleFullscreen"
+        @toggle-fullscreen="toggleFullscreen"
         @copy-clipboard="handleCopyClipboard"
+        @paste-clipboard="handlePasteClipboard"
         @disconnect="handleDisconnect"
       />
 
@@ -216,6 +268,8 @@ onUnmounted(async () => {
             :session-id="store.selectedSessionId"
             :width="currentConnection?.width || 1024"
             :height="currentConnection?.height || 768"
+            :is-fullscreen="isFullscreen"
+            @resize="handleCanvasResize"
           />
         </div>
       </div>

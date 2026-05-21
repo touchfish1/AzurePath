@@ -23,6 +23,10 @@ export const useRemoteDesktopStore = defineStore("remoteDesktop", () => {
   const isLoading = ref(false);
   const error = ref<string | null>(null);
 
+  // ── Clipboard state ──
+  const clipboardText = ref<string | null>(null);
+  const clipboardSupported = ref(false);
+
   const selectedSession = computed(() =>
     sessions.value.find((s) => s.id === selectedSessionId.value) ?? null,
   );
@@ -94,6 +98,11 @@ export const useRemoteDesktopStore = defineStore("remoteDesktop", () => {
     await rdSendMouse(sessionId, event);
   }
 
+  async function pushClipboard(sessionId: string, text: string) {
+    // Will be implemented when backend supports it
+    console.log("clipboard push:", sessionId, text);
+  }
+
   return {
     sessions,
     activeConnections,
@@ -101,6 +110,8 @@ export const useRemoteDesktopStore = defineStore("remoteDesktop", () => {
     selectedSession,
     isLoading,
     error,
+    clipboardText,
+    clipboardSupported,
     init,
     loadSessions,
     createSession,
@@ -109,5 +120,6 @@ export const useRemoteDesktopStore = defineStore("remoteDesktop", () => {
     disconnect,
     sendKey,
     sendMouse,
+    pushClipboard,
   };
 });
