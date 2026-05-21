@@ -89,12 +89,14 @@ pub fn run() {
 
             // Register global shortcut (Ctrl+Alt+A)
             use tauri_plugin_global_shortcut::GlobalShortcutExt;
-            app.global_shortcut().register(
+            if let Err(e) = app.global_shortcut().register(
                 tauri_plugin_global_shortcut::Shortcut::new(
                     Some(tauri_plugin_global_shortcut::Modifiers::ALT | tauri_plugin_global_shortcut::Modifiers::CONTROL),
                     tauri_plugin_global_shortcut::Code::KeyA,
                 ),
-            )?;
+            ) {
+                eprintln!("[azurepath] global shortcut register warning: {e}");
+            }
 
             Ok(())
         })
