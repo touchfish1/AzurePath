@@ -50,6 +50,7 @@ x509-cert = "0.2"
 des = "0.8"
 cipher = "0.4"
 local-ip-address = "0.6"
+snmp2 = "0.5"
 
 [dev-dependencies]
 tempfile = "3"
