@@ -108,6 +108,11 @@ const routes: RouteRecordRaw[] = [
     component: () => import("@/pages/bandwidth/Page.vue"),
   },
   {
+    path: "/snmp",
+    name: "snmp",
+    component: () => import("@/pages/snmp/Page.vue"),
+  },
+  {
     path: "/api-test",
     name: "api-test",
     component: () => import("@/pages/api-test/Page.vue"),
