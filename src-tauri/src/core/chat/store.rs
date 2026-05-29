@@ -29,7 +29,7 @@ impl ChatStore {
     }
 
     fn db_path() -> Result<PathBuf, String> {
-        let home = home_dir().ok_or("Cannot find home directory")?;
+        let home = crate::core::utils::home_dir().ok_or("Cannot find home directory")?;
         Ok(home.join("AzurePath").join("azurepath.db"))
     }
 
@@ -273,10 +273,6 @@ impl ChatStore {
         }
         Ok(peers)
     }
-}
-
-fn home_dir() -> Option<PathBuf> {
-    crate::core::utils::home_dir()
 }
 
 #[cfg(test)]
@@ -613,16 +609,4 @@ mod tests {
         assert_eq!(peers[1].id, "old");
     }
 
-    // -----------------------------------------------------------------------
-    // home_dir utility
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn test_home_dir_returns_some() {
-        // At least one of USERPROFILE or HOME should be set in any test environment
-        let dir = home_dir();
-        assert!(dir.is_some(), "Expected home_dir() to return a path");
-        let path = dir.unwrap();
-        assert!(path.is_absolute(), "Home directory should be absolute");
-    }
 }

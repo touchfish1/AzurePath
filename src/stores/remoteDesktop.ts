@@ -41,7 +41,7 @@ export const useRemoteDesktopStore = defineStore("remoteDesktop", () => {
     error.value = null;
     try {
       sessions.value = await rdListSessions();
-    } catch (e: any) {
+    } catch (e: unknown) {
       error.value = String(e);
     } finally {
       isLoading.value = false;
@@ -76,7 +76,7 @@ export const useRemoteDesktopStore = defineStore("remoteDesktop", () => {
         status: "connected",
       };
       selectedSessionId.value = sessionId;
-    } catch (e: any) {
+    } catch (e: unknown) {
       activeConnections.value[sessionId] = {
         ...activeConnections.value[sessionId],
         status: "disconnected",
