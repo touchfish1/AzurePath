@@ -189,18 +189,20 @@ function isActive(path: string): boolean {
       <!-- Grouped items -->
       <template v-for="group in groups" :key="group.label">
         <!-- Group header -->
-        <button
-          v-if="!collapsed"
-          class="flex w-full items-center rounded-lg px-3 py-2 text-base font-semibold tracking-wide text-ink-faint transition-colors hover:text-ink"
-          :class="{ 'text-bamboo': isGroupActive(group) }"
-          @click="toggleGroup(group.label)"
-        >
-          <ChevronDown
-            class="h-3 w-3 transition-transform duration-150"
-            :class="{ '-rotate-90': !expandedGroups.has(group.label) }"
-          />
-          <span class="ml-1.5 uppercase">{{ group.label }}</span>
-        </button>
+      <button
+        v-if="!collapsed"
+        class="flex w-full items-center rounded-lg px-3 py-2 text-base font-semibold tracking-wide text-ink-faint transition-colors hover:text-ink"
+        :class="{ 'text-bamboo': isGroupActive(group) }"
+        @click="toggleGroup(group.label)"
+        :aria-expanded="expandedGroups.has(group.label)"
+        :aria-controls="`nav-group-${group.label}`"
+      >
+        <ChevronDown
+          class="h-3 w-3 transition-transform duration-150"
+          :class="{ '-rotate-90': !expandedGroups.has(group.label) }"
+        />
+        <span class="ml-1.5 uppercase">{{ group.label }}</span>
+      </button>
 
         <!-- Collapsed: show group icon as clickable -->
         <button
@@ -208,6 +210,7 @@ function isActive(path: string): boolean {
           class="flex w-full items-center justify-center rounded-lg px-3 py-2 text-sm transition-colors"
           :class="isGroupActive(group) ? 'text-bamboo' : 'text-ink-soft hover:text-ink'"
           :title="group.label"
+          :aria-label="group.label"
           @click="toggleGroup(group.label)"
         >
           <component :is="group.icon" class="h-4 w-4 shrink-0" />
@@ -215,6 +218,7 @@ function isActive(path: string): boolean {
 
         <!-- Sub-items -->
         <template v-if="expandedGroups.has(group.label)">
+          <div :id="`nav-group-${group.label}`" role="group" :aria-label="group.label">
           <router-link
             v-for="item in group.items"
             :key="item.name"
@@ -232,6 +236,7 @@ function isActive(path: string): boolean {
             <component :is="item.icon" class="h-4 w-4 shrink-0" />
             <span v-if="!collapsed">{{ item.label }}</span>
           </router-link>
+          </div>
         </template>
       </template>
     </nav>
@@ -242,6 +247,7 @@ function isActive(path: string): boolean {
         class="flex w-full items-center justify-center rounded-lg px-3 py-2 text-sm text-ink-soft transition-colors hover:bg-paper-deep/50 hover:text-ink"
         @click="emit('toggle-collapse')"
         :title="collapsed ? '展开侧栏' : '折叠侧栏'"
+        :aria-label="collapsed ? '展开侧栏' : '折叠侧栏'"
       >
         <component :is="collapsed ? ChevronsRight : ChevronsLeft" class="h-4 w-4" />
         <span v-if="!collapsed" class="ml-3">折叠</span>
