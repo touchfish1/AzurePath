@@ -95,6 +95,12 @@ impl FileReceiver {
             return;
         }
 
+        // Check available disk space before accepting the file
+        if let Err(e) = check_available_space(&self.download_dir, total_size) {
+            warn!("[file] Rejected file due to insufficient disk space: {}", e);
+            return;
+        }
+
         // Read filename
         let filename_raw = match read_string(&mut stream).await {
             Ok(name) => name,
@@ -218,6 +224,21 @@ pub fn default_download_dir() -> PathBuf {
     home.join("AzurePath").join("downloads")
 }
 
+/// Check that the filesystem containing `path` has at least `needed` bytes
+/// of free space available.  Returns an error if space is insufficient or
+/// the check itself fails (e.g. path does not exist).
+fn check_available_space(path: &std::path::Path, needed: u64) -> Result<(), String> {
+    let available = fs2::available_space(path)
+        .map_err(|e| format!("Failed to check disk space: {}", e))?;
+    if available < needed {
+        return Err(format!(
+            "Insufficient disk space: need {} bytes, only {} bytes available",
+            needed, available
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -334,6 +355,22 @@ mod tests {
     fn test_sanitize_filename_nested_dots() {
         // Consecutive ".." sequences become "_" after the ..→_ replacement
         assert_eq!(sanitize_filename("a..b"), "a__b");
+    }
+
+    #[test]
+    fn test_check_available_space_ok_on_existing_dir() {
+        // The download directory will be created by FileReceiver, so
+        // check against a temp dir that definitely exists.
+        let tmp = std::env::temp_dir();
+        // A 1-byte check should always pass on any real filesystem.
+        assert!(check_available_space(&tmp, 1).is_ok());
+    }
+
+    #[test]
+    fn test_check_available_space_fails_on_nonexistent_path() {
+        let bogus = PathBuf::from(r"C:\__does_not_exist__\");
+        let result = check_available_space(&bogus, 1);
+        assert!(result.is_err());
     }
 }
 

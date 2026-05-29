@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "com.azurepath.app",
   "build": {
-    "beforeDevCommand": "npm run dev",
-    "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build",
+    "beforeDevCommand": "bun run dev",
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeBuildCommand": "bun run build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -24,13 +24,13 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: asset:; font-src 'self' data:; connect-src 'self' ws:; media-src 'self'; object-src 'none'; frame-src 'none';"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' http://127.0.0.1:1420; font-src 'self' data:; object-src 'none'; frame-ancestors 'none'; form-action 'self'; base-uri 'self'"
     }
   },
   "plugins": {
     "updater": {
-      "pubkey": "",
-      "endpoints": [],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEREOTQ2QzNGN0FENDdEQzQKUldURWZkUjZQMnlVM2NIRWdjYnBVSHlsc1BHdTI0ZlorSmcyWlFFdlJxODVnRjlQN1hIVThlYnAK",
+      "endpoints": ["https://github.com/chengccn/AzurePath/releases/latest/download/updates.json"],
       "windows": { "installMode": "passive" }
     }
   },

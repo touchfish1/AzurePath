@@ -24,6 +24,9 @@ Thumbs.db
 # Tauri generated schemas
 src-tauri/gen/
 
+# Updater signing keys (PRIVATE - never commit)
+src-tauri/updater.key
+
 # Rust
 *.pdb
 .cargo/
